@@ -4,18 +4,19 @@
 
 start() ->
     {ok, Socket} = gen_tcp:connect('localhost', 9991, [binary, {active, true}]),
-    case gen_tcp:recv(Socket, 0) of
-        {ok, BinaryData} ->
-            ListData = erlang:binary_to_list(BinaryData),
-            {connected, Name} = lists:nth(1, ListData),
+    gen_tcp:recv(Socket, 0),
+    receive
+        {tcp, Socket, BinaryData} ->
+            Data = erlang:binary_to_term(BinaryData),
+            {connected, Name} = Data,
             io:format("connected to server, with username ~p~n", [Name]);
-        {error, Reason} ->
-            io:format("not connected to the server: ~p~n", [Reason])
+        {tcp_closed, Socket} ->
+            io:format("not connected to the server: ~n")
     end,
     ClientStatus = #client_status{serverSocket = Socket},
-    put(startPid, self()),
-    SpawnedPid = spawn(client, loop,[ClientStatus]),
-    put(spawnedPid, SpawnedPid).
+    % put(startPid, self()),
+    SpawnedPid = spawn(client, loop,[ClientStatus]).
+    % put(spawnedPid, SpawnedPid).
 
 loop(ClientStatus) ->
     Socket = ClientStatus#client_status.serverSocket,

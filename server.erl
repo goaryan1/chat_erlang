@@ -1,37 +1,35 @@
 -module(server).
--export([start/0, loop/1, accept_clients/1, broadcast/1, remove_client/1, show_clients/0, print_messages/1]).
+-export([start/0, loop/1, accept_clients/2, broadcast/1, remove_client/1, show_clients/0, print_messages/1]).
 -record(client, {clientSocket, clientName}).
 -record(message, {timestamp, senderName, text}). %senderName connects with #client.clientName
 -include_lib("stdlib/include/qlc.hrl").
 
 start() ->
     init_databases(),
-    {ok, ListenSocket} = gen_tcp:listen(9990, [binary, {packet, 0}, {active, false}]),
+    {ok, ListenSocket} = gen_tcp:listen(9991, [binary, {packet, 0}, {active, false}]),
     io:format("Server listening on port 9990 and Socket : ~p ~n",[ListenSocket]),
-    spawn(server, accept_clients, [ListenSocket]).
+    Counter = 1,
+    spawn(server, accept_clients, [ListenSocket, Counter]).
 
 init_databases() ->
     mnesia:start(),
     mnesia:create_table(client, [{attributes, record_info(fields, client)}]),
     mnesia:create_table(message, [{attributes, record_info(fields, message)}, {type, ordered_set}]).
 
-accept_clients(ListenSocket) ->
+accept_clients(ListenSocket, Counter) ->
     {ok, ClientSocket} = gen_tcp:accept(ListenSocket),
-    {ok, {set_name, ClientName}} = gen_tcp:recv(ClientSocket, 0),
-    case userNameUsed(ClientName) of
-        true ->
-            % Connection Rejected
-            gen_tcp:send(ClientSocket, <<"Oops!! Username already in use, Retry with a different username.">>),
-            gen_tcp:close(ClientSocket);
-        false ->
-            io:format("Accepted connection from ~p~n", [ClientName]),
-            % gen_tcp:send(ClientSocket, {<<"Hello, ",ClientName/binary, "!">>}),
-            spawn(server, loop, [ClientSocket]),
-            insert_client_database(ClientSocket, ClientName),
-            Message = "User" ++ ClientName ++ " joined the ChatRoom.",
-            broadcast({ClientSocket, Message})
-        end,
-    accept_clients(ListenSocket).
+    ClientName = "User" ++ integer_to_list(Counter),
+    io:format("Accepted connection from ~p~n", [ClientName]),
+    Data = {connected, ClientName},
+    BinaryData = erlang:list_to_binary(Data),
+    gen_tcp:send(ClientSocket, BinaryData),
+    % gen_tcp:send(ClientSocket, {<<"Hello, ",ClientName/binary, "!">>}),
+    spawn(server, loop, [ClientSocket]),
+    insert_client_database(ClientSocket, ClientName),
+    Message = "User" ++ ClientName ++ " joined the ChatRoom.",
+    broadcast({ClientSocket, Message}),
+    NewCounter = Counter + 1,
+    accept_clients(ListenSocket, NewCounter).
 
 insert_client_database(ClientSocket, ClientName) ->
     % io:format("Data Inserted ~n"),
@@ -131,9 +129,12 @@ show_clients() ->
         end, Keys).
 
 print_messages(N) ->
-    %prints previous N messages
-    mnesia:transaction(fun() ->
-        Query = qlc:q([M || M <- mnesia:table(message)]),
-        {atomic, Messages} = qlc:e(mnesia:query_ref(), Query),
-        lists:reverse(lists:sublist(Messages, 1, N))
-    end).
+    F = fun() ->
+        qlc:e(qlc:q([M || M <- mnesia:table(message)]))
+    end,
+    {atomic, Query} = mnesia:transaction(F),
+    ReverseMessages = lists:sublist(lists:reverse(Query), 1, N),
+    Messages = lists:reverse(ReverseMessages),
+    lists:foreach(fun(X) ->
+        io:format("~p~n", [X]) end, Messages).
+

@@ -26,7 +26,7 @@ accept_clients(ListenSocket, Counter) ->
     gen_tcp:send(ClientSocket, BinaryData),
     spawn(server, loop, [ClientSocket]),
     insert_client_database(ClientSocket, ClientName),
-    Message = "User" ++ ClientName ++ " joined the ChatRoom.",
+    Message = "User " ++ ClientName ++ " joined the ChatRoom.",
     broadcast({ClientSocket, Message}),
     NewCounter = Counter + 1,
     accept_clients(ListenSocket, NewCounter).

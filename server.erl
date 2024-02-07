@@ -17,13 +17,14 @@ init_databases() ->
     mnesia:create_table(message, [{attributes, record_info(fields, message)}, {type, ordered_set}]).
 
 accept_clients(ListenSocket, Counter) ->
+    io:format("Function Accept Clients ~n"),
     {ok, ClientSocket} = gen_tcp:accept(ListenSocket),
     ClientName = "User" ++ integer_to_list(Counter),
     io:format("Accepted connection from ~p~n", [ClientName]),
     Data = {connected, ClientName},
     BinaryData = erlang:term_to_binary(Data),
     gen_tcp:send(ClientSocket, BinaryData),
-    io:format("Accepted connection from ~p~n", [ClientName]),
+    % io:format("Accepted connection from ~p~n", [ClientName]),
     spawn(server, loop, [ClientSocket]),
     insert_client_database(ClientSocket, ClientName),
     Message = "User" ++ ClientName ++ " joined the ChatRoom.",
@@ -45,6 +46,8 @@ insert_message_database(ClientName, Message) ->
             mnesia:write(MessageRecord)
         end).
 
+
+
 userNameUsed(UserName) ->
     case mnesia:dirty_read({client, UserName}) of
         [] ->
@@ -54,19 +57,22 @@ userNameUsed(UserName) ->
     end.
 
 getUserName(ClientSocket) ->
-    case mnesia:dirty_read({client_table, ClientSocket}) of
-        [] ->
-            {error, not_found};
-        [{ClientSocket, ClientName}] ->
-            {ok, ClientName}
-    end.
+    Trans = fun() -> mnesia:read({client, ClientSocket}) end, 
+    {atomic,[Record]} = mnesia:transaction(Trans),
+    Record#client.clientName.
+        % case mnesia:dirty_read({client, ClientSocket}) of
+        %     [] ->
+        %         not_found;
+        %     [{ClientSocket, ClientName}] ->
+        %         ClientName
+        % end.
 
 getSocket(ClientName) ->
     case mnesia:dirty_read({client_table, '$1', ClientName}) of
         [] ->
-            {error, not_found};
+            not_found;
         [{ClientSocket, _ClientName}] ->
-            {ok, ClientSocket}
+            ClientSocket
     end.
 
 loop(ClientSocket) ->
@@ -78,7 +84,8 @@ loop(ClientSocket) ->
             loop(ClientSocket);
         {tcp, ClientSocket, {message, Message}} ->
             io:format("Received from ~p: ~s~n",[getUserName(ClientSocket),Message]),
-            broadcast({ClientSocket,Message});    
+            broadcast({ClientSocket,Message}),
+            loop(ClientSocket);   
         {tcp, ClientSocket, {exit}} ->
             io:format("Client ~p left the ChatRoom.~n",[getUserName(ClientSocket)]),
             LeavingMessage = getUserName(ClientSocket) ++ " left the ChatRoom.",
@@ -93,7 +100,7 @@ broadcast({SenderSocket, Message}, Receiver) ->
     % private messages don't get saved in the database
     RecSocket = getSocket(Receiver),
     SenderName = getUserName(SenderSocket),
-    gen_tcp:send(RecSocket, {SenderName, Message}).
+    gen_tcp:send(RecSocket, term_to_binary({SenderName, Message})).
 
 broadcast({SenderSocket, Message}) ->
     SenderName = getUserName(SenderSocket),
@@ -104,7 +111,8 @@ broadcast({SenderSocket, Message}) ->
             true ->
                 case mnesia:dirty_read({client, ClientSocket}) of
                 [_] ->
-                    gen_tcp:send(ClientSocket, {SenderName, Message});
+                    io:format("Broadcasted the Message~n"),
+                    gen_tcp:send(ClientSocket, term_to_binary({SenderName, Message}));
                 [] ->
                     io:format("No receiver Found ~n") 
                 end;
@@ -137,4 +145,3 @@ print_messages(N) ->
     Messages = lists:reverse(ReverseMessages),
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, Messages).
-

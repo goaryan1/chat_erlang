@@ -9,21 +9,25 @@ start() ->
         {tcp, Socket, BinaryData} ->
             Data = erlang:binary_to_term(BinaryData),
             {connected, Name} = Data,
-            io:format("connected to server, with username ~p~n", [Name]);
+            io:format("connected to server, with username ~p~n", [Name]),
+            ClientStatus = #client_status{name=Name, serverSocket = Socket},
+            loop(ClientStatus);
         {tcp_closed, Socket} ->
             io:format("not connected to the server: ~n")
-    end,
-    ClientStatus = #client_status{serverSocket = Socket},
-    % put(startPid, self()),
-    SpawnedPid = spawn(client, loop,[ClientStatus]).
+    end.
+    
+    % SpawnedPid = spawn(client, loop,[ClientStatus]).
     % put(spawnedPid, SpawnedPid).
 
-loop(ClientStatus) ->
+loop(#client_status{} = ClientStatus) ->
+    io:format("Line22~n"),
     Socket = ClientStatus#client_status.serverSocket,
     gen_tcp:recv(Socket, 0),    % activate listening
+    io:format("Line25~n"),
     receive
-        {tcp, Socket, {Message}} ->
-            io:format("Received: ~s~n", [Message]),
+        {tcp, Socket, BinaryData} ->
+            {SenderName,Message} = erlang:binary_to_term(BinaryData),
+            io:format("Received from ~p : ~p~n", [SenderName,Message]),
             loop(Socket);
         {tcp_closed, Socket} ->
             io:format("Connection closed~n"),

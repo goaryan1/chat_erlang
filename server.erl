@@ -6,7 +6,7 @@
 
 start() ->
     init_databases(),
-    {ok, ListenSocket} = gen_tcp:listen(9990, [binary, {packet, 0}, {active, true}]),
+    {ok, ListenSocket} = gen_tcp:listen(9991, [binary, {packet, 0}, {active, true}]),
     io:format("Server listening on port 9990 and Socket : ~p ~n",[ListenSocket]),
     Counter = 1,
     spawn(server, accept_clients, [ListenSocket, Counter]).
@@ -17,38 +17,22 @@ init_databases() ->
     mnesia:create_table(message, [{attributes, record_info(fields, message)}, {type, ordered_set}]).
 
 accept_clients(ListenSocket, Counter) ->
-    io:format("Function Accept Clients ~n"),
     {ok, ClientSocket} = gen_tcp:accept(ListenSocket),
     ClientName = "User" ++ integer_to_list(Counter),
     io:format("Accepted connection from ~p~n", [ClientName]),
     Data = {connected, ClientName},
     BinaryData = erlang:term_to_binary(Data),
     gen_tcp:send(ClientSocket, BinaryData),
-    % spawn(server, loop, [ClientSocket]),
     insert_client_database(ClientSocket, ClientName),
-    % loopPid ! {self(), newClient},
     Message = ClientName ++ " joined the ChatRoom.",
     broadcast({ClientSocket, Message}),
     NewCounter = Counter + 1,
-
     ListenPid = spawn(server, loop, [ClientSocket]),
     gen_tcp:controlling_process(ClientSocket, ListenPid),
-
     accept_clients(ListenSocket, NewCounter).
 
 loop(ClientSocket) ->
-    io:format("entered listen function~n"),
-    % ClientSocketList,
-
-    % Trans = fun() ->
-    %     mnesia:all_keys(client) end,
-    % {atomic, ClientSocketList} = mnesia:transaction(Trans),
-    % io:format("~p~n", [ClientSocketList]),
-    % lists:foreach(fun(X) ->
-    %     gen_tcp:recv(X, 0) end, ClientSocketList),
-
     gen_tcp:recv(ClientSocket, 0),
-
     receive
         {tcp, ClientSocket, BinaryData} ->
             Data = binary_to_term(BinaryData),
@@ -68,6 +52,7 @@ loop(ClientSocket) ->
                 {show_clients} ->
                     List = show_clients(),
                     gen_tcp:send(ClientSocket, term_to_binary({List})),
+                    io:format("~p~n",[List]),
                     loop(ClientSocket);
                 % Exit from ChatRoom
                 {exit} ->
@@ -89,7 +74,7 @@ insert_client_database(ClientSocket, ClientName) ->
     end).
 
 insert_message_database(ClientName, Message) ->
-    % io:format("Data Inserted ~n"),
+
         MessageRecord = #message{timestamp = os:timestamp(), senderName = ClientName, text = Message},
         mnesia:transaction(fun() ->
             mnesia:write(MessageRecord)
@@ -109,57 +94,23 @@ getUserName(ClientSocket) ->
     Record#client.clientName.
 
 getSocket(Name) ->
-    Query = qlc:q([{User#client.clientSocket} || User <- mnesia:table(client), User#client.clientName == Name]),
-    case mnesia:transaction(fun() -> qlc:e(Query) end) of
+    Query = qlc:q([User#client.clientSocket || User <- mnesia:table(client), User#client.clientName == Name]),
+    Trans = mnesia:transaction(fun() -> qlc:e(Query) end),
+    case Trans of
         {atomic, [Socket]} ->
-            {X} = Socket,
-            X;
+            Socket;
         {atomic, []} ->
             {error, not_found};
         {aborted, Reason} ->
             {error, Reason}
     end.
 
-% loop(ClientSocket) ->
-%     io:format("entered loop~n"),
-%     gen_tcp:recv(ClientSocket, 0),  % Activate passive mode for the client socket
-%     receive
-%         {tcp, _ClientSocket, BinaryData} ->
-%             Data = binary_to_term(BinaryData),
-%             io:format("Message received: ~p~n", [Data]),
-%             case Data of
-%                 % Private Message
-%                 {private_message, Message, Receiver} ->
-%                     io:format("Client ~p send message to ~p : ~p~n", [getUserName(ClientSocket), Receiver, Message]),
-%                     broadcast({ClientSocket, Message}, Receiver),
-%                     loop(ClientSocket);
-%                 % Broadcast Message
-%                 {message, Message} ->
-%                     io:format("Received from ~p: ~s~n",[getUserName(ClientSocket),Message]),
-%                     broadcast({ClientSocket,Message}),
-%                     loop(ClientSocket); 
-%                 % Send list of Active Clients 
-%                 {show_clients} ->
-%                     List = show_clients(),
-%                     gen_tcp:send(ClientSocket, term_to_binary({List})),
-%                     loop(ClientSocket);
-%                 % Exit from ChatRoom
-%                 {exit} ->
-%                     io:format("Client ~p left the ChatRoom.~n",[getUserName(ClientSocket)]),
-%                     LeavingMessage = getUserName(ClientSocket) ++ " left the ChatRoom.",
-%                     broadcast({ClientSocket, LeavingMessage}),
-%                     remove_client(ClientSocket)
-%             end;
-%         % Client Connection lost
-%         {tcp_closed, ClientSocket} ->
-%             io:format("Client ~p disconnected~n", [getUserName(ClientSocket)]),
-%             remove_client(ClientSocket)
-%     end.
-
 broadcast({SenderSocket, Message}, Receiver) ->
     % private messages don't get saved in the database
+    io:format("receiver : ~p~n", [Receiver]),
     RecSocket = getSocket(Receiver),
     SenderName = getUserName(SenderSocket),
+    io:format("RecScoket : ~p, Sendername : ~p~n",[RecSocket, SenderName]),
     gen_tcp:send(RecSocket, term_to_binary({message, SenderName, Message})).
 
 broadcast({SenderSocket, Message}) ->
@@ -189,14 +140,14 @@ remove_client(ClientSocket) ->
     gen_tcp:close(ClientSocket).
 
 show_clients() ->
-    Keys = mnesia:dirty_all_keys(client),
-    Clients_list = lists:foreach( fun(X) ->
-        Trans = fun() -> mnesia:read({client, X}) end,
-        {atomic,[ClientRecord]} = mnesia:transaction(Trans), 
-        ClientName = ClientRecord#client.clientName,
-        io:format("ClientName: ~p, ClientSocket: ~p~n", [ClientName, X])
-        end, Keys),
-    Clients_list.
+    mnesia:transaction(fun() ->
+        {atomic, Rows} = mnesia:dirty_all_keys(client),
+        lists:map(fun(Key) ->
+            {atomic, Value} = mnesia:dirty_read({client, Key}),
+            Value
+        end, Rows)
+    end).
+
 
 print_messages(N) ->
     F = fun() ->
@@ -207,5 +158,3 @@ print_messages(N) ->
     Messages = lists:reverse(ReverseMessages),
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, Messages).
-
-

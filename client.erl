@@ -1,5 +1,5 @@
 -module(client).
--export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0]).
+-export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0, set_name/0]).
 -record(client_status, {name, serverSocket, startPid, spawnedPid}).
 
 start() ->
@@ -11,8 +11,10 @@ start() ->
 start_helper(ClientStatus) ->
     {ok, Socket} = gen_tcp:connect('localhost', 9990, [binary, {active, true}]),
     gen_tcp:recv(Socket, 0),
+    io:format("1. ~p~n", [Socket]),
     receive
         {tcp, Socket, BinaryData} ->
+            io:format("2. ~p~n", [Socket]),
             Data = erlang:binary_to_term(BinaryData),
             {connected, Name} = Data,
             io:format("connected to server, with username ~p~n", [Name]),
@@ -40,11 +42,12 @@ loop(ClientStatus) ->
         {tcp_closed, Socket} ->
             io:format("Connection closed~n"),
             ok;
-        {StartPid, {message, Message, Receiver}} ->
-            BinaryData = term_to_binary({message, Message, Receiver}),
+        {StartPid, {private_message, Message, Receiver}} ->
+            BinaryData = term_to_binary({private_message, Message, Receiver}),
             gen_tcp:send(Socket, BinaryData);
         {StartPid, {message, Message}} ->
             io:format("Message received from startPid~n"),
+            io:format("sending to socket: ~p~n", [Socket]),
             BinaryData = term_to_binary({message, Message}),
             gen_tcp:send(Socket, BinaryData);
         {StartPid, {exit}} ->
@@ -79,7 +82,7 @@ send_private_message() ->
     Receiver = io:get_line("Enter receiver name: "),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {message, Message, Receiver}}.
+    SpawnedPid ! {StartPid, {private_message, Message, Receiver}}.
 
 exit() ->
     StartPid = get(startPid),
@@ -99,3 +102,9 @@ help() ->
 print_list(List) ->
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, List).
+
+set_name() ->
+    NewName = io:get_line("Enter desired username: "),
+    StartPid = get(startPid),
+    SpawnedPid = get(spawnedPid),
+    SpawnedPid ! {StartPid, {set_name, NewName}}.

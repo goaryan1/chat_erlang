@@ -1,12 +1,12 @@
 -module(server).
--export([start/0, loop/1, accept_clients/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1]).
+-export([start/0, accept_clients/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/1]).
 -record(client, {clientSocket, clientName}).
--record(message, {timestamp, senderName, text}). %senderName connects with #client.clientName
+-record(message, {timestamp, senderName, text}). %senderName corresponds to #client.clientName
 -include_lib("stdlib/include/qlc.hrl").
 
 start() ->
     init_databases(),
-    {ok, ListenSocket} = gen_tcp:listen(9990, [binary, {packet, 0}, {active, false}]),
+    {ok, ListenSocket} = gen_tcp:listen(9990, [binary, {packet, 0}, {active, true}]),
     io:format("Server listening on port 9990 and Socket : ~p ~n",[ListenSocket]),
     Counter = 1,
     spawn(server, accept_clients, [ListenSocket, Counter]).
@@ -24,12 +24,63 @@ accept_clients(ListenSocket, Counter) ->
     Data = {connected, ClientName},
     BinaryData = erlang:term_to_binary(Data),
     gen_tcp:send(ClientSocket, BinaryData),
-    spawn(server, loop, [ClientSocket]),
+    % spawn(server, loop, [ClientSocket]),
     insert_client_database(ClientSocket, ClientName),
-    Message = "User " ++ ClientName ++ " joined the ChatRoom.",
+    % loopPid ! {self(), newClient},
+    Message = ClientName ++ " joined the ChatRoom.",
     broadcast({ClientSocket, Message}),
     NewCounter = Counter + 1,
+
+    ListenPid = spawn(server, loop, [ClientSocket]),
+    gen_tcp:controlling_process(ClientSocket, ListenPid),
+
     accept_clients(ListenSocket, NewCounter).
+
+loop(ClientSocket) ->
+    io:format("entered listen function~n"),
+    % ClientSocketList,
+
+    % Trans = fun() ->
+    %     mnesia:all_keys(client) end,
+    % {atomic, ClientSocketList} = mnesia:transaction(Trans),
+    % io:format("~p~n", [ClientSocketList]),
+    % lists:foreach(fun(X) ->
+    %     gen_tcp:recv(X, 0) end, ClientSocketList),
+
+    gen_tcp:recv(ClientSocket, 0),
+
+    receive
+        {tcp, ClientSocket, BinaryData} ->
+            Data = binary_to_term(BinaryData),
+            io:format("Message received: ~p~n", [Data]),
+            case Data of
+                % Private Message
+                {private_message, Message, Receiver} ->
+                    io:format("Client ~p send message to ~p : ~p~n", [getUserName(ClientSocket), Receiver, Message]),
+                    broadcast({ClientSocket, Message}, Receiver),
+                    loop(ClientSocket);
+                % Broadcast Message
+                {message, Message} ->
+                    io:format("Received from ~p: ~s~n",[getUserName(ClientSocket),Message]),
+                    broadcast({ClientSocket,Message}),
+                    loop(ClientSocket); 
+                % Send list of Active Clients 
+                {show_clients} ->
+                    List = show_clients(),
+                    gen_tcp:send(ClientSocket, term_to_binary({List})),
+                    loop(ClientSocket);
+                % Exit from ChatRoom
+                {exit} ->
+                    io:format("Client ~p left the ChatRoom.~n",[getUserName(ClientSocket)]),
+                    LeavingMessage = getUserName(ClientSocket) ++ " left the ChatRoom.",
+                    broadcast({ClientSocket, LeavingMessage}),
+                    remove_client(ClientSocket)
+            end;
+        % Client Connection lost
+        {tcp_closed, ClientSocket} ->
+            io:format("Client ~p disconnected~n", [getUserName(ClientSocket)]),
+            remove_client(ClientSocket)
+    end.
 
 insert_client_database(ClientSocket, ClientName) ->
     ClientRecord = #client{clientSocket=ClientSocket, clientName = ClientName},
@@ -38,7 +89,7 @@ insert_client_database(ClientSocket, ClientName) ->
     end).
 
 insert_message_database(ClientName, Message) ->
-    io:format("Data Inserted ~n"),
+    % io:format("Data Inserted ~n"),
         MessageRecord = #message{timestamp = os:timestamp(), senderName = ClientName, text = Message},
         mnesia:transaction(fun() ->
             mnesia:write(MessageRecord)
@@ -69,40 +120,41 @@ getSocket(Name) ->
             {error, Reason}
     end.
 
-loop(ClientSocket) ->
-    gen_tcp:recv(ClientSocket, 0),  % Activate passive mode for the client socket
-    receive
-        % Received a Message
-        {tcp, ClientSocket, BinaryData} ->
-            Data = binary_to_term(BinaryData),
-            case Data of
-                % Private Message
-                {message, Message, Receiver} ->
-                    io:format("Client ~p send message to ~p : ~p~n", [getUserName(ClientSocket), Receiver, Message]),
-                    broadcast({ClientSocket, Message}, Receiver),
-                    loop(ClientSocket);
-                % Broadcast Message
-                {message, Message} ->
-                    io:format("Received from ~p: ~s~n",[getUserName(ClientSocket),Message]),
-                    broadcast({ClientSocket,Message}),
-                    loop(ClientSocket); 
-                % Send list of Active Clients 
-                {show_clients} ->
-                    List = show_clients(),
-                    gen_tcp:send(ClientSocket, term_to_binary({List})),
-                    loop(ClientSocket);
-                % Exit from ChatRoom
-                {exit} ->
-                    io:format("Client ~p left the ChatRoom.~n",[getUserName(ClientSocket)]),
-                    LeavingMessage = getUserName(ClientSocket) ++ " left the ChatRoom.",
-                    broadcast({ClientSocket, LeavingMessage}),
-                    remove_client(ClientSocket)
-            end;
-        % Client Connection lost
-        {tcp_closed, ClientSocket} ->
-            io:format("Client ~p disconnected~n", [getUserName(ClientSocket)]),
-            remove_client(ClientSocket)
-    end.
+% loop(ClientSocket) ->
+%     io:format("entered loop~n"),
+%     gen_tcp:recv(ClientSocket, 0),  % Activate passive mode for the client socket
+%     receive
+%         {tcp, _ClientSocket, BinaryData} ->
+%             Data = binary_to_term(BinaryData),
+%             io:format("Message received: ~p~n", [Data]),
+%             case Data of
+%                 % Private Message
+%                 {private_message, Message, Receiver} ->
+%                     io:format("Client ~p send message to ~p : ~p~n", [getUserName(ClientSocket), Receiver, Message]),
+%                     broadcast({ClientSocket, Message}, Receiver),
+%                     loop(ClientSocket);
+%                 % Broadcast Message
+%                 {message, Message} ->
+%                     io:format("Received from ~p: ~s~n",[getUserName(ClientSocket),Message]),
+%                     broadcast({ClientSocket,Message}),
+%                     loop(ClientSocket); 
+%                 % Send list of Active Clients 
+%                 {show_clients} ->
+%                     List = show_clients(),
+%                     gen_tcp:send(ClientSocket, term_to_binary({List})),
+%                     loop(ClientSocket);
+%                 % Exit from ChatRoom
+%                 {exit} ->
+%                     io:format("Client ~p left the ChatRoom.~n",[getUserName(ClientSocket)]),
+%                     LeavingMessage = getUserName(ClientSocket) ++ " left the ChatRoom.",
+%                     broadcast({ClientSocket, LeavingMessage}),
+%                     remove_client(ClientSocket)
+%             end;
+%         % Client Connection lost
+%         {tcp_closed, ClientSocket} ->
+%             io:format("Client ~p disconnected~n", [getUserName(ClientSocket)]),
+%             remove_client(ClientSocket)
+%     end.
 
 broadcast({SenderSocket, Message}, Receiver) ->
     % private messages don't get saved in the database
@@ -155,3 +207,5 @@ print_messages(N) ->
     Messages = lists:reverse(ReverseMessages),
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, Messages).
+
+

@@ -9,7 +9,7 @@ start() ->
     put(startPid, self()).
 
 start_helper(ClientStatus) ->
-    {ok, Socket} = gen_tcp:connect('localhost', 9990, [binary, {active, true}]),
+    {ok, Socket} = gen_tcp:connect('localhost', 9991, [binary, {active, true}]),
     gen_tcp:recv(Socket, 0),
     io:format("1. ~p~n", [Socket]),
     receive
@@ -55,9 +55,10 @@ loop(ClientStatus) ->
             gen_tcp:send(Socket, BinaryData);
         {StartPid, {show_clients}} ->
             BinaryData = term_to_binary({show_clients}),
+            gen_tcp:send(Socket, BinaryData),
             ClientList = get_client_list(ClientStatus),
-            print_list(ClientList),
-            gen_tcp:send(Socket, BinaryData)
+            io:format("~p~n", [ClientList]),
+            print_list(ClientList)
     end,
     loop(ClientStatus).
 
@@ -72,14 +73,14 @@ get_client_list(#client_status{} = ClientStatus) ->
     end.
 
 send_message() ->
-    Message = io:get_line("Enter message (or 'exit' to quit): "),
+    Message = string:trim(io:get_line("Enter message (or 'exit' to quit): ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
     SpawnedPid ! {StartPid, {message, Message}}.
 
 send_private_message() ->
-    Message = io:get_line("Enter message: "),
-    Receiver = io:get_line("Enter receiver name: "),
+    Message = string:trim(io:get_line("Enter message: ")),
+    Receiver = string:trim(io:get_line("Enter receiver name: ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
     SpawnedPid ! {StartPid, {private_message, Message, Receiver}}.

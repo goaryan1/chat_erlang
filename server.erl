@@ -182,6 +182,7 @@ show_clients() ->
     end).
 
 
+
 print_messages(N) ->
     F = fun() ->
         qlc:e(qlc:q([M || M <- mnesia:table(message)]))

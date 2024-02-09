@@ -1,5 +1,5 @@
 -module(client).
--export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0, set_name/0]).
+-export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0]).
 -record(client_status, {name, serverSocket, startPid, spawnedPid}).
 
 start() ->
@@ -52,15 +52,38 @@ loop(ClientStatus) ->
             gen_tcp:send(Socket, BinaryData);
         {StartPid, {exit}} ->
             BinaryData = term_to_binary({exit}),
-            gen_tcp:send(Socket, BinaryData);
+            gen_tcp:send(Socket, BinaryData);   % close the process and print exit message
         {StartPid, {show_clients}} ->
             BinaryData = term_to_binary({show_clients}),
             gen_tcp:send(Socket, BinaryData),
             ClientList = get_client_list(ClientStatus),
             io:format("~p~n", [ClientList]),
             print_list(ClientList)
+        % {StartPid, {set_name, NewName}} ->
+        %     BinaryData = term_to_binary({set_name, NewName}),
+        %     gen_tcp:send(Socket, BinaryData),
+        %     set_name_handler(ClientStatus, NewName)
     end,
     loop(ClientStatus).
+
+% set_name_handler(#client_status{} = ClientStatus, NewName) ->
+%     io:format("70"),
+%     Socket = ClientStatus#client_status.serverSocket,
+%     gen_tcp:recv(Socket, 0),
+%     receive
+%         {tcp, Socket, BinaryData} ->
+%             Data = binary_to_term(BinaryData),
+%             io:format("Data received: ~p~n", Data),
+%             case Data of
+%                 {error, Message} ->
+%                     io:format("error while updating username: ~p~n", [Message]),
+%                     ClientStatus;
+%                 {success, _Message} ->
+%                     io:format("username updated to ~p~n", [NewName]),
+%                     ClientStatus1 = ClientStatus#client_status{name = NewName},
+%                     ClientStatus1
+%             end
+%     end.
 
 get_client_list(#client_status{} = ClientStatus) ->
     Socket = ClientStatus#client_status.serverSocket,
@@ -73,7 +96,7 @@ get_client_list(#client_status{} = ClientStatus) ->
     end.
 
 send_message() ->
-    Message = string:trim(io:get_line("Enter message (or 'exit' to quit): ")),
+    Message = string:trim(io:get_line("Enter message: ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
     SpawnedPid ! {StartPid, {message, Message}}.
@@ -104,8 +127,8 @@ print_list(List) ->
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, List).
 
-set_name() ->
-    NewName = io:get_line("Enter desired username: "),
-    StartPid = get(startPid),
-    SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {set_name, NewName}}.
+% set_name() ->
+%     NewName = string:trim(io:get_line("Enter desired username: ")),
+%     StartPid = get(startPid),
+%     SpawnedPid = get(spawnedPid),
+%     SpawnedPid ! {StartPid, {set_name, NewName}}.

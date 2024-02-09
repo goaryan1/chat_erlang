@@ -7,7 +7,7 @@
 start() ->
     init_databases(),
     {N,[]} =  string:to_integer(string:trim(io:get_line("Enter No of Clients Allowed : "))),
-    {ok, ListenSocket} = gen_tcp:listen(9991, [binary, {packet, 0}, {active, true}]),
+    {ok, ListenSocket} = gen_tcp:listen(9990, [binary, {packet, 0}, {active, true}]),
     io:format("Server listening on port 9990 and Socket : ~p ~n",[ListenSocket]),
     Counter = 1,
     spawn(server, accept_clients, [ListenSocket, Counter, N]).
@@ -64,7 +64,7 @@ loop(ClientSocket) ->
                     loop(ClientSocket); 
                 % Send list of Active Clients 
                 {show_clients} ->
-                    List = show_clients(),
+                    List = retreive_clients(),
                     gen_tcp:send(ClientSocket, term_to_binary({List})),
                     io:format("~p~n",[List]),
                     loop(ClientSocket);
@@ -174,14 +174,17 @@ remove_client(ClientSocket) ->
     gen_tcp:close(ClientSocket).
 
 show_clients() ->
-    mnesia:transaction(fun() ->
-        {atomic, Rows} = mnesia:dirty_all_keys(client),
-        lists:map(fun(Key) ->
-            {atomic, Value} = mnesia:dirty_read({client, Key}),
-            Value
-        end, Rows)
-    end).
+    ClientList = retreive_clients(),
+    io:format("Connected Clients:~n"),
+    lists:foreach(fun(X) ->
+        io:format("~p~n", [X]) end, ClientList).
 
+retreive_clients() ->
+    F = fun() ->
+        qlc:e(qlc:q([M || M <- mnesia:table(client)]))
+    end,
+    {atomic, ClientList} = mnesia:transaction(F),
+    ClientList.
 
 retreive_messages(N) ->
     F = fun() ->
@@ -194,5 +197,6 @@ retreive_messages(N) ->
 
 print_messages(N) ->
     Messages = retreive_messages(N),
+    io:format("Messages:~n"),
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, Messages).

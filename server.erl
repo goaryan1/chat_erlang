@@ -1,48 +1,36 @@
 -module(server).
--export([start/0, accept_clients/3, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/1]).
+-export([start/0, accept_clients/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/1]).
 -record(client, {clientSocket, clientName}).
 -record(message, {timestamp, senderName, text}). %senderName corresponds to #client.clientName
 -include_lib("stdlib/include/qlc.hrl").
 
 start() ->
     init_databases(),
-    {N,[]} =  string:to_integer(string:trim(io:get_line("Enter No of Clients Allowed : "))),
     {ok, ListenSocket} = gen_tcp:listen(9991, [binary, {packet, 0}, {active, true}]),
     io:format("Server listening on port 9990 and Socket : ~p ~n",[ListenSocket]),
     Counter = 1,
-    spawn(server, accept_clients, [ListenSocket, Counter, N]).
+    spawn(server, accept_clients, [ListenSocket, Counter]).
 
 init_databases() ->
     mnesia:start(),
     mnesia:create_table(client, [{attributes, record_info(fields, client)}]),
     mnesia:create_table(message, [{attributes, record_info(fields, message)}, {type, ordered_set}]).
 
-accept_clients(ListenSocket, Counter, N) ->
+accept_clients(ListenSocket, Counter) ->
     {ok, ClientSocket} = gen_tcp:accept(ListenSocket),
-    Active_clients = active_clients(),
-    io:format("~p~n",[Active_clients]),
-    if 
-        Active_clients<N ->
-            ClientName = "User" ++ integer_to_list(Counter),
-            io:format("Accepted connection from ~p~n", [ClientName]),
-            Data = {connected, ClientName},
-            BinaryData = erlang:term_to_binary(Data),
-            gen_tcp:send(ClientSocket, BinaryData),
-            insert_client_database(ClientSocket, ClientName),
-            Message = ClientName ++ " joined the ChatRoom.",
-            broadcast({ClientSocket, Message}),
-            NewCounter = Counter + 1,
-            ListenPid = spawn(server, loop, [ClientSocket]),
-            gen_tcp:controlling_process(ClientSocket, ListenPid),
-            accept_clients(ListenSocket, NewCounter, N);
-        true->
-            Message = "No Space on Server :(",
-            gen_tcp:send(ClientSocket, Message),
-            gen_tcp:close(ClientSocket),
-            accept_clients(ListenSocket, Counter, N)
-    end.
-
-    
+    ClientName = "User" ++ integer_to_list(Counter),
+    io:format("Accepted connection from ~p~n", [ClientName]),
+    MessageHistory = retreive_messages(10),
+    Data = {connected, ClientName, MessageHistory},
+    BinaryData = erlang:term_to_binary(Data),
+    gen_tcp:send(ClientSocket, BinaryData),
+    insert_client_database(ClientSocket, ClientName),
+    Message = ClientName ++ " joined the ChatRoom.",
+    broadcast({ClientSocket, Message}),
+    NewCounter = Counter + 1,
+    ListenPid = spawn(server, loop, [ClientSocket]),
+    gen_tcp:controlling_process(ClientSocket, ListenPid),
+    accept_clients(ListenSocket, NewCounter).
 
 loop(ClientSocket) ->
     gen_tcp:recv(ClientSocket, 0),
@@ -115,12 +103,6 @@ userNameUsed(UserName) ->
             true
     end.
 
-active_clients() ->
-    Trans = fun() -> mnesia:all_keys(client) end,
-    {atomic,List} = mnesia:transaction(Trans),
-    No_of_clients = length(List),
-    No_of_clients.
-
 getUserName(ClientSocket) ->
     Trans = fun() -> mnesia:read({client, ClientSocket}) end, 
     {atomic,[Record]} = mnesia:transaction(Trans),
@@ -181,14 +163,16 @@ show_clients() ->
         end, Rows)
     end).
 
-
-
-print_messages(N) ->
+retreive_messages(N) ->
     F = fun() ->
         qlc:e(qlc:q([M || M <- mnesia:table(message)]))
     end,
     {atomic, Query} = mnesia:transaction(F),
     ReverseMessages = lists:sublist(lists:reverse(Query), 1, N),
     Messages = lists:reverse(ReverseMessages),
+    Messages.
+
+print_messages(N) ->
+    Messages = retreive_messages(N),
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, Messages).

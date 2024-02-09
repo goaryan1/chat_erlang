@@ -17,7 +17,8 @@ start_helper(ClientStatus) ->
             case Data of
                 {connected, Name, MessageHistory} ->
                     io:format("connected to server, with username ~p~n", [Name]),
-                    io:format("message history: ~n~p~n", [MessageHistory]),
+                    io:format("Message History: ~n"),
+                    print_list(MessageHistory),
                     ClientStatus1 = ClientStatus#client_status{serverSocket = Socket, name = Name},
                     loop(ClientStatus1);
                 {reject, Message} ->
@@ -58,7 +59,10 @@ loop(ClientStatus) ->
             BinaryData = term_to_binary({show_clients}),
             gen_tcp:send(Socket, BinaryData),
             ClientList = get_client_list(ClientStatus),
-            print_list(ClientList)
+            FormattedClientList = lists:map(fun({client, _, Name}) ->
+                Name
+                end, ClientList),
+            print_list(FormattedClientList)
     end,
     loop(ClientStatus).
 

@@ -59,13 +59,27 @@ loop(ClientSocket) ->
                     io:format("Client ~p left the ChatRoom.~n",[getUserName(ClientSocket)]),
                     LeavingMessage = getUserName(ClientSocket) ++ " left the ChatRoom.",
                     broadcast({ClientSocket, LeavingMessage}),
-                    remove_client(ClientSocket)
+                    remove_client(ClientSocket);
+                {set_name, NewName} ->
+                    io:format("inside set_name~n"),
+                    case userNameUsed(NewName) of
+                        true ->
+                            io:format("name is used~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({error, "Name already in use"}));
+                        false ->
+                            io:format("name is unused~n"),
+                            updateName(ClientSocket, NewName),
+                            gen_tcp:send(ClientSocket, term_to_binary({success, "Name updated to " ++ NewName}))
+                end
             end;
         % Client Connection lost
         {tcp_closed, ClientSocket} ->
             io:format("Client ~p disconnected~n", [getUserName(ClientSocket)]),
             remove_client(ClientSocket)
     end.
+
+updateName(ClientSocket, NewName) ->
+    mnesia:write(#client{clientName =  NewName, clientSocket = ClientSocket}).
 
 insert_client_database(ClientSocket, ClientName) ->
     ClientRecord = #client{clientSocket=ClientSocket, clientName = ClientName},
@@ -80,13 +94,13 @@ insert_message_database(ClientName, Message) ->
             mnesia:write(MessageRecord)
         end).
 
-% userNameUsed(UserName) ->
-%     case mnesia:dirty_read({client, UserName}) of
-%         [] ->
-%             false;
-%         [_] ->
-%             true
-%     end.
+userNameUsed(UserName) ->
+    case mnesia:dirty_read({client, UserName}) of
+        [] ->
+            false;
+        [_] ->
+            true
+    end.
 
 getUserName(ClientSocket) ->
     Trans = fun() -> mnesia:read({client, ClientSocket}) end, 
@@ -158,3 +172,4 @@ print_messages(N) ->
     Messages = lists:reverse(ReverseMessages),
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, Messages).
+

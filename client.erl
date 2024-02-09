@@ -16,8 +16,9 @@ start_helper(ClientStatus) ->
         {tcp, Socket, BinaryData} ->
             io:format("2. ~p~n", [Socket]),
             Data = erlang:binary_to_term(BinaryData),
-            {connected, Name} = Data,
+            {connected, Name, MessageHistory} = Data,
             io:format("connected to server, with username ~p~n", [Name]),
+            io:format("message history: ~n~p~n", [MessageHistory]),
             ClientStatus1 = ClientStatus#client_status{serverSocket = Socket, name = Name},
             loop(ClientStatus1);
         {tcp_closed, Socket} ->

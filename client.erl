@@ -1,6 +1,6 @@
 -module(client).
--export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0]).
--record(client_status, {name, serverSocket, startPid, spawnedPid}).
+-export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0, kick/0]).
+-record(client_status, {name, serverSocket, startPid, spawnedPid, adminStatus = false}).
 
 start() ->
     ClientStatus = #client_status{startPid = self()},
@@ -37,34 +37,58 @@ loop(ClientStatus) ->
             Data = binary_to_term(BinaryData),
             case Data of
                 {message, SenderName, Message} ->
-                    io:format("Received: ~p from user ~p~n", [Message, SenderName]),
-                    loop(ClientStatus);
-                true ->
+                    io:format("Received: ~p from user ~p~n", [Message, SenderName]);
+                {admin, NewAdminStatus} ->
+                    ClientStatus1 = ClientStatus#client_status{adminStatus = NewAdminStatus},
+                    case NewAdminStatus of
+                        true ->
+                            io:format("Admin rights received !!~n");
+                        false ->
+                            io:format("Admin rights revoked !!~n")
+                    end,
+                    loop(ClientStatus1);
+                _ ->
                     io:format("Undefined message received~n")
             end;
         {tcp_closed, Socket} ->
             io:format("Connection closed~n"),
             ok;
-        {StartPid, {private_message, Message, Receiver}} ->
-            BinaryData = term_to_binary({private_message, Message, Receiver}),
-            gen_tcp:send(Socket, BinaryData),
-            private_message_helper(ClientStatus);
-        {StartPid, {message, Message}} ->
-            BinaryData = term_to_binary({message, Message}),
-            gen_tcp:send(Socket, BinaryData);
-        {StartPid, {exit}} ->
-            BinaryData = term_to_binary({exit}),
-            gen_tcp:send(Socket, BinaryData); 
-        {StartPid, {show_clients}} ->
-            BinaryData = term_to_binary({show_clients}),
-            gen_tcp:send(Socket, BinaryData),
-            ClientList = get_client_list(ClientStatus),
-            FormattedClientList = lists:map(fun({client, _, Name}) ->
-                Name
-                end, ClientList),
-            print_list(FormattedClientList)
+        {StartPid, Data} ->
+            case Data of
+                {private_message, Message, Receiver} ->
+                    BinaryData = term_to_binary({private_message, Message, Receiver}),
+                    gen_tcp:send(Socket, BinaryData),
+                    private_message_helper(ClientStatus);
+                {message, Message} ->
+                    BinaryData = term_to_binary({message, Message}),
+                    gen_tcp:send(Socket, BinaryData);
+                {exit} ->
+                    BinaryData = term_to_binary({exit}),
+                    gen_tcp:send(Socket, BinaryData); 
+                {show_clients} ->
+                    BinaryData = term_to_binary({show_clients}),
+                    gen_tcp:send(Socket, BinaryData),
+                    ClientList = get_client_list(ClientStatus),
+                    FormattedClientList = lists:map(fun({client, _, Name}) ->
+                        Name
+                        end, ClientList),
+                    print_list(FormattedClientList);
+                {kick, ClientName} ->
+                    kick_helper(ClientStatus, ClientName)
+            end
     end,
     loop(ClientStatus).
+
+kick_helper(ClientStatus, ClientName) ->
+    Socket = ClientStatus#client_status.serverSocket,
+    AdminStatus = ClientStatus#client_status.adminStatus,
+    case AdminStatus of
+        true ->
+            BinaryData = term_to_binary({kick, ClientName}),
+            gen_tcp:send(Socket, BinaryData);
+        false ->
+            io:format("Admin rights not available~n")
+    end.
 
 private_message_helper(#client_status{} = ClientStatus) ->
     Socket = ClientStatus#client_status.serverSocket,
@@ -121,6 +145,12 @@ help() ->
 print_list(List) ->
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, List).
+
+kick() ->
+    ClientName = string:trim(io:get_line("Enter Client Name: ")),
+    StartPid = get(startPid),
+    SpawnedPid = get(spawnedPid),
+    SpawnedPid ! {StartPid, {kick, ClientName}}.
 
 
 % ----------------------------------

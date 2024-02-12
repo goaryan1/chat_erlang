@@ -1,30 +1,39 @@
 -module(server).
--export([start/0, accept_clients/1, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/1]).
+-export([start/0, accept_clients/1, get_chat_topic/1, update_chat_topic/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/2]).
 -record(client, {clientSocket, clientName}).
 -record(message, {timestamp, senderName, text}).
--record(server_status, {listenSocket, counter, maxClients, historySize}).
+-record(status, {listenSocket, counter, maxClients, historySize, chatTopic}).
 -include_lib("stdlib/include/qlc.hrl").
 
 start() ->
     init_databases(),
     {N,[]} =  string:to_integer(string:trim(io:get_line("Enter No of Clients Allowed : "))),
     {X,[]} =  string:to_integer(string:trim(io:get_line("Message History Size : "))),
+    ChatTopic = string:trim(io:get_line("Enter Chat Topic : ")),
     {ok, ListenSocket} = gen_tcp:listen(9991, [binary, {packet, 0}, {active, true}]),
-    io:format("Server listening on port 9991 and Socket : ~p ~n",[ListenSocket]),
+    io:format("Server listening on port 9990 and Socket : ~p ~n",[ListenSocket]),
     Counter = 1,
-    ServerStatus = #server_status{listenSocket = ListenSocket, counter = Counter, maxClients = N, historySize = X},
-    spawn(server, accept_clients, [ServerStatus]).
+    ServerRecord = #status{listenSocket = ListenSocket, counter = Counter, maxClients = N, historySize = X, chatTopic = ChatTopic},
+    mnesia:transaction(fun() ->
+        mnesia:write(ServerRecord) end),
+    spawn(server, accept_clients, [ListenSocket]).
 
 init_databases() ->
     mnesia:start(),
     mnesia:create_table(client, [{attributes, record_info(fields, client)}]),
-    mnesia:create_table(message, [{attributes, record_info(fields, message)}, {type, ordered_set}]).
+    mnesia:create_table(message, [{attributes, record_info(fields, message)}, {type, ordered_set}]),
+    mnesia:create_table(status, [{attributes, record_info(fields, status)}]).
 
-accept_clients(ServerStatus) ->
-    ListenSocket = ServerStatus#server_status.listenSocket,
-    MaxClients = ServerStatus#server_status.maxClients,
-    HistorySize = ServerStatus#server_status.historySize,
-    Counter = ServerStatus#server_status.counter,
+accept_clients(ListenSocket) ->
+    {atomic,[Row]} = mnesia:transaction(fun() ->mnesia:read(status, ListenSocket) end),
+    MaxClients = Row#status.maxClients,
+    HistorySize = Row#status.historySize,
+    Counter = Row#status.counter,
+    ChatTopic = Row#status.chatTopic,
+    % MaxClients = ServerStatus#server_status.maxClients,
+    % HistorySize = ServerStatus#server_status.historySize,
+    % Counter = ServerStatus#server_status.counter,
+    % ChatTopic = ServerStatus#server_status.chatTopic,
     {ok, ClientSocket} = gen_tcp:accept(ListenSocket),
     Active_clients = active_clients(),
     if 
@@ -32,25 +41,27 @@ accept_clients(ServerStatus) ->
             ClientName = "User" ++ integer_to_list(Counter),
             io:format("Accepted connection from ~p~n", [ClientName]),
             MessageHistory = retreive_messages(HistorySize),
-            Data = {connected, ClientName, MessageHistory},
+            Data = {connected, ClientName, MessageHistory, ChatTopic},
             BinaryData = erlang:term_to_binary(Data),
             gen_tcp:send(ClientSocket, BinaryData),
             insert_client_database(ClientSocket, ClientName),
             Message = ClientName ++ " joined the ChatRoom.",
             broadcast({ClientSocket, Message}),
             NewCounter = Counter + 1,
-            ServerStatus1 = ServerStatus#server_status{counter = NewCounter},
-            ListenPid = spawn(server, loop, [ClientSocket]),
+            {atomic, [Record]} = mnesia:transaction(fun() -> mnesia:read({status, ListenSocket}) end),
+            UpdatedRecord = Record#status{counter = NewCounter},
+            mnesia:transaction(fun()->mnesia:write(UpdatedRecord) end),
+            ListenPid = spawn(server, loop, [ClientSocket, ListenSocket]),
             gen_tcp:controlling_process(ClientSocket, ListenPid),
-            accept_clients(ServerStatus1);
+            accept_clients(ListenSocket);
         true->
             Message = "No Space on Server :(",
             gen_tcp:send(ClientSocket, term_to_binary({reject,Message})),
             gen_tcp:close(ClientSocket),
-            accept_clients(ServerStatus)
+            accept_clients(ListenSocket)
     end.
 
-loop(ClientSocket) ->
+loop(ClientSocket, ListenSocket) ->
     gen_tcp:recv(ClientSocket, 0),
     receive
         {tcp, ClientSocket, BinaryData} ->
@@ -60,17 +71,29 @@ loop(ClientSocket) ->
                 {private_message, Message, Receiver} ->
                     io:format("Client ~p send message to ~p : ~p~n", [getUserName(ClientSocket), Receiver, Message]),
                     broadcast({ClientSocket, Message}, Receiver),
-                    loop(ClientSocket);
+                    loop(ClientSocket, ListenSocket);
                 % Broadcast Message
                 {message, Message} ->
                     io:format("Received from ~p: ~s~n",[getUserName(ClientSocket),Message]),
                     broadcast({ClientSocket,Message}),
-                    loop(ClientSocket); 
+                    loop(ClientSocket, ListenSocket); 
                 % Send list of Active Clients 
                 {show_clients} ->
                     List = retreive_clients(),
                     gen_tcp:send(ClientSocket, term_to_binary({List})),
-                    loop(ClientSocket);
+                    loop(ClientSocket, ListenSocket);
+                % Get Chat Topic
+                {topic} ->
+                    Topic = get_chat_topic(ListenSocket),
+                    gen_tcp:send(ClientSocket, term_to_binary({topic, Topic})),
+                    loop(ClientSocket, ListenSocket);
+                %Change Chat Topic
+                {change_topic, NewTopic} ->
+                    update_chat_topic(NewTopic, ListenSocket),
+                    gen_tcp:send(ClientSocket, term_to_binary({success})),
+                    Message = "Chat Topic Updated to " ++ NewTopic,
+                    broadcast({ClientSocket, Message}),
+                    loop(ClientSocket, ListenSocket);
                 % Exit from ChatRoom
                 {exit} ->
                     io:format("Client ~p left the ChatRoom.~n",[getUserName(ClientSocket)]),
@@ -157,6 +180,16 @@ remove_client(ClientSocket) ->
         mnesia:delete_object(ClientRecord)
     end),
     gen_tcp:close(ClientSocket).
+
+get_chat_topic(ListenSocket) ->
+        Trans = fun() -> mnesia:read({status, ListenSocket}) end,
+    {atomic, [Row]} = mnesia:transaction(Trans),
+    Row#status.chatTopic.
+
+update_chat_topic(NewTopic, ListenSocket) ->
+    {atomic, [Row]} = mnesia:transaction(fun() -> mnesia:read({status, ListenSocket}) end),
+    UpdatedRecord = Row#status{chatTopic = NewTopic},
+    mnesia:transaction(fun()->mnesia:write(UpdatedRecord) end).
 
 show_clients() ->
     ClientList = retreive_clients(),

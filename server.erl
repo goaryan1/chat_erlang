@@ -1,6 +1,6 @@
 -module(server).
--export([start/0, accept_clients/1, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/1]).
--record(client, {clientSocket, clientName}).
+-export([start/0, accept_clients/1, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/1, make_admin/0, remove_admin/0]).
+-record(client, {clientSocket, clientName, adminStatus = false}).
 -record(message, {timestamp, senderName, text}).
 -record(server_status, {listenSocket, counter, maxClients, historySize}).
 -include_lib("stdlib/include/qlc.hrl").
@@ -73,16 +73,27 @@ loop(ClientSocket) ->
                     loop(ClientSocket);
                 % Exit from ChatRoom
                 {exit} ->
-                    io:format("Client ~p left the ChatRoom.~n",[getUserName(ClientSocket)]),
-                    LeavingMessage = getUserName(ClientSocket) ++ " left the ChatRoom.",
+                    ClientName = getUserName(ClientSocket),
+                    io:format("Client ~p left the ChatRoom.~n",[ClientName]),
+                    LeavingMessage = ClientName ++ " left the ChatRoom.",
                     broadcast({ClientSocket, LeavingMessage}),
-                    remove_client(ClientSocket)
+                    remove_client(ClientSocket);
+                {kick, KickClientName} ->
+                    KickClientSocket = getSocket(KickClientName),
+                    io:format("Client ~p was kicked from the chatroom.~n",[KickClientName]),
+                    KickingMessage = KickClientName ++ " was kicked from the chatroom.",
+                    broadcast({ClientSocket, KickingMessage}),
+                    remove_client(KickClientSocket),
+                    loop(ClientSocket);
+                _ ->
+                    io:format("Undefined message received~n")
             end;
-        % Client Connection lost
         {tcp_closed, ClientSocket} ->
+            io:format("91~n"),
             io:format("Client ~p disconnected~n", [getUserName(ClientSocket)]),
             remove_client(ClientSocket)
     end.
+    % loop(ClientSocket).
 
 insert_client_database(ClientSocket, ClientName) ->
     ClientRecord = #client{clientSocket=ClientSocket, clientName = ClientName},
@@ -116,7 +127,9 @@ getSocket(Name) ->
         {atomic, []} ->
             {error, not_found};
         {aborted, Reason} ->
-            {error, Reason}
+            {error, Reason};
+        _ ->
+            {error, not_found}
     end.
 
 broadcast({SenderSocket, Message}, Receiver) ->
@@ -193,6 +206,32 @@ print_messages(N) ->
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, Messages).
 
+make_admin() ->
+    ClientName = string:trim(io:get_line("Enter Client Name: ")),
+    ClientSocket = getSocket(ClientName),
+    case ClientSocket of
+        {error, _Message} ->
+            io:format("No such user found~n");
+        ClientSocket ->
+            % mnesia:write(#client{clientSocket = ClientSocket, clientName = ClientName, adminStatus = true}),
+            gen_tcp:send(ClientSocket, term_to_binary({admin, true}))
+    end.
+    % io:format("199~n"),
+    % io:format("ClientSocket = ~p~n", [ClientSocket]),
+    
+remove_admin() ->
+    ClientName = string:trim(io:get_line("Enter Client Name: ")),
+    ClientSocket = getSocket(ClientName),
+    case ClientSocket of
+        {error, _Message} ->
+            io:format("No such user found~n");
+        ClientSocket ->
+            % mnesia:write(#client{clientSocket = ClientSocket, clientName = ClientName, adminStatus = false}),
+            gen_tcp:send(ClientSocket, term_to_binary({admin, false}))
+    end.
+
+
+
 % -----------------------------------------
 
 
@@ -227,3 +266,5 @@ print_messages(N) ->
 %             updateName(ClientSocket, NewName),
 %             gen_tcp:send(ClientSocket, term_to_binary({success, "Name updated to " ++ NewName}))
 %     end
+
+

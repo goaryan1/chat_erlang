@@ -1,5 +1,5 @@
 -module(client).
--export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0]).
+-export([start/0, send_message/0, change_topic/0, loop/1, exit/0, get_chat_topic/0, start_helper/1, send_private_message/0, show_clients/0, help/0]).
 -record(client_status, {name, serverSocket, startPid, spawnedPid}).
 
 start() ->
@@ -15,8 +15,9 @@ start_helper(ClientStatus) ->
         {tcp, Socket, BinaryData} ->
             Data = erlang:binary_to_term(BinaryData),
             case Data of
-                {connected, Name, MessageHistory} ->
+                {connected, Name, MessageHistory, ChatTopic} ->
                     io:format("connected to server, with username ~p~n", [Name]),
+                    io:format("Topic of the ChatRoom is : ~p~n",[ChatTopic]),
                     io:format("Message History: ~n"),
                     print_list(MessageHistory),
                     ClientStatus1 = ClientStatus#client_status{serverSocket = Socket, name = Name},
@@ -62,7 +63,22 @@ loop(ClientStatus) ->
             FormattedClientList = lists:map(fun({client, _, Name}) ->
                 Name
                 end, ClientList),
-            print_list(FormattedClientList)
+            print_list(FormattedClientList);
+        {StartPid, {topic}} ->
+            BinaryData = term_to_binary({topic}),
+            gen_tcp:send(Socket, BinaryData),
+            ChatTopic = get_topic(ClientStatus),
+            io:format("Topic of the ChatRoom is : ~p~n",[ChatTopic]);
+        {StartPid, {change_topic, NewTopic}} ->
+            BinaryData = term_to_binary({change_topic, NewTopic}),
+            gen_tcp:send(Socket, BinaryData),
+            Status = get_status(ClientStatus),
+            case Status of
+                {success} ->
+                    io:format("Topic of the ChatRoom is updated to : ~p~n",[NewTopic]);
+                _ ->
+                    io:format("Error while Changing the Topic")
+            end
     end,
     loop(ClientStatus).
 
@@ -90,6 +106,31 @@ get_client_list(#client_status{} = ClientStatus) ->
             ClientList
     end.
 
+get_topic(ClientStatus) ->
+    Socket = ClientStatus#client_status.serverSocket,
+    gen_tcp:recv(Socket, 0),
+    receive
+        {tcp, Socket, BinaryData} ->
+            Data = binary_to_term(BinaryData),
+            {topic, ChatTopic} = Data,
+            ChatTopic
+    end.
+
+get_status(ClientStatus) ->
+    Socket = ClientStatus#client_status.serverSocket,
+    gen_tcp:recv(Socket, 0),
+    receive
+        {tcp, Socket, BinaryData} ->
+            Data = binary_to_term(BinaryData),
+            Data
+    end.
+
+change_topic() ->
+    Topic = string:trim(io:get_line("Enter New Topic : ")),
+    StartPid = get(startPid),
+    SpawnedPid = get(spawnedPid),
+    SpawnedPid ! {StartPid, {change_topic, Topic}}.
+
 send_message() ->
     Message = string:trim(io:get_line("Enter message: ")),
     StartPid = get(startPid),
@@ -107,6 +148,11 @@ exit() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
     SpawnedPid ! {StartPid, {exit}}.
+
+get_chat_topic() ->
+    StartPid = get(startPid),
+    SpawnedPid = get(spawnedPid),
+    SpawnedPid ! {StartPid, {topic}}.
 
 show_clients() ->
     StartPid = get(startPid),

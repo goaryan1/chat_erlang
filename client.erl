@@ -1,6 +1,6 @@
 -module(client).
 -export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0, kick/0]).
--record(client_status, {name, serverSocket, startPid, spawnedPid, adminStatus = false}).
+-record(client_status, {name, serverSocket, startPid, spawnedPid, adminStatus = false, muteTime = os:timestamp(), muteDuration = 0}).
 
 start() ->
     ClientStatus = #client_status{startPid = self()},
@@ -9,7 +9,7 @@ start() ->
     put(startPid, self()).
 
 start_helper(ClientStatus) ->
-    {ok, Socket} = gen_tcp:connect('localhost', 9991, [binary, {active, true}]),
+    {ok, Socket} = gen_tcp:connect('localhost', 9990, [binary, {active, true}]),
     gen_tcp:recv(Socket, 0),
     receive
         {tcp, Socket, BinaryData} ->
@@ -47,6 +47,16 @@ loop(ClientStatus) ->
                             io:format("Admin rights revoked !!~n")
                     end,
                     loop(ClientStatus1);
+                {mute, NewMuteStatus, Duration} ->
+                    case NewMuteStatus of
+                        true ->
+                            ClientStatus1 = ClientStatus#client_status{muteTime = os:timestamp(), muteDuration = Duration},
+                            io:format("Muted for ~p minutes~n", [Duration]);
+                        false ->
+                            ClientStatus1 = ClientStatus#client_status{muteTime = os:timestamp(), muteDuration = 0},
+                            io:format("Unmuted !!~n")
+                    end,
+                    loop(ClientStatus1);
                 _ ->
                     io:format("Undefined message received~n")
             end;
@@ -60,8 +70,14 @@ loop(ClientStatus) ->
                     gen_tcp:send(Socket, BinaryData),
                     private_message_helper(ClientStatus);
                 {message, Message} ->
-                    BinaryData = term_to_binary({message, Message}),
-                    gen_tcp:send(Socket, BinaryData);
+                    {MuteCheck, Duration} = mute_check(ClientStatus),
+                    case MuteCheck of
+                        true ->
+                            io:format("Muted for ~p more minutes. ~n", [Duration]);
+                        false ->
+                            BinaryData = term_to_binary({message, Message}),
+                            gen_tcp:send(Socket, BinaryData)
+                    end;
                 {exit} ->
                     BinaryData = term_to_binary({exit}),
                     gen_tcp:send(Socket, BinaryData); 
@@ -78,6 +94,19 @@ loop(ClientStatus) ->
             end
     end,
     loop(ClientStatus).
+
+mute_check(ClientStatus) ->
+    {_, TimeNow, _} = os:timestamp(),
+    MuteDuration = ClientStatus#client_status.muteDuration,
+    {_, TimeOfMute, _} = ClientStatus#client_status.muteTime,
+    TimeSinceMute = (TimeNow - TimeOfMute)/(60),
+    TimeLeft = MuteDuration - TimeSinceMute,
+    case (TimeLeft > 0) of
+        true ->
+            {true, TimeLeft};   % still mute
+        false ->
+            {false, 0}      % mute time ended
+    end.
 
 kick_helper(ClientStatus, ClientName) ->
     Socket = ClientStatus#client_status.serverSocket,
@@ -154,8 +183,6 @@ kick() ->
 
 
 % ----------------------------------
-
-
 
 
 

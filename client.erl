@@ -1,5 +1,5 @@
 -module(client).
--export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0, kick/0]).
+-export([start/0, send_message/0, loop/1, exit/0, start_helper/1, send_private_message/0, show_clients/0, help/0, kick/0, make_admin/0, show_admins/0]).
 -record(client_status, {name, serverSocket, startPid, spawnedPid, adminStatus = false, muteTime = os:timestamp(), muteDuration = 0}).
 
 start() ->
@@ -80,20 +80,53 @@ loop(ClientStatus) ->
                     end;
                 {exit} ->
                     BinaryData = term_to_binary({exit}),
-                    gen_tcp:send(Socket, BinaryData); 
+                    gen_tcp:send(Socket, BinaryData);
+                {make_admin, ClientName} ->
+                    make_admin_helper(ClientStatus, ClientName);
                 {show_clients} ->
                     BinaryData = term_to_binary({show_clients}),
                     gen_tcp:send(Socket, BinaryData),
                     ClientList = get_client_list(ClientStatus),
-                    FormattedClientList = lists:map(fun({client, _, Name}) ->
+                    FormattedClientList = lists:map(fun({client, _, Name, _}) ->
                         Name
                         end, ClientList),
                     print_list(FormattedClientList);
+                {show_admins} ->
+                    BinaryData = term_to_binary({show_clients}),
+                    gen_tcp:send(Socket, BinaryData),
+                    ClientList = get_client_list(ClientStatus),
+                    FilteredClientList = lists:filter(fun({client, _, _, Status}) ->
+                        Status == true end, ClientList),
+                    FormattedAdminClientList = lists:map(fun({client, _, Name, _}) ->
+                        Name
+                        end, FilteredClientList),
+                    print_list(FormattedAdminClientList);
                 {kick, ClientName} ->
                     kick_helper(ClientStatus, ClientName)
             end
     end,
     loop(ClientStatus).
+
+make_admin_helper(ClientStatus, ClientName) ->
+    Socket = ClientStatus#client_status.serverSocket,
+    AdminStatus = ClientStatus#client_status.adminStatus,
+    case AdminStatus of
+        true ->
+            BinaryData = term_to_binary({make_admin, ClientName}),
+            gen_tcp:send(Socket, BinaryData),
+            receive
+                {tcp, Socket, BinaryDataRec} ->
+                    Data = binary_to_term(BinaryDataRec),
+                    case Data of
+                        {success} ->
+                            ok;
+                        {error, Message} ->
+                            io:format("error: ~p", [Message])
+                    end
+            end;
+        false ->
+            io:format("Admin rights not available~n")
+    end.
 
 mute_check(ClientStatus) ->
     {_, TimeNow, _} = os:timestamp(),
@@ -190,6 +223,20 @@ kick() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
     SpawnedPid ! {StartPid, {kick, ClientName}}.
+
+make_admin() ->
+    ClientName = string:trim(io:get_line("Enter Client Name: ")),
+    StartPid = get(startPid),
+    SpawnedPid = get(spawnedPid),
+    SpawnedPid ! {StartPid, {make_admin, ClientName}}.
+
+show_admins() ->
+    StartPid = get(startPid),
+    SpawnedPid = get(spawnedPid),
+    SpawnedPid ! {StartPid, {show_admins}}.
+
+
+
 
 
 % ----------------------------------

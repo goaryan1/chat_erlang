@@ -114,7 +114,17 @@ kick_helper(ClientStatus, ClientName) ->
     case AdminStatus of
         true ->
             BinaryData = term_to_binary({kick, ClientName}),
-            gen_tcp:send(Socket, BinaryData);
+            gen_tcp:send(Socket, BinaryData),
+            receive
+                {tcp, Socket, BinaryDataRec} ->
+                    Data = binary_to_term(BinaryDataRec),
+                    case Data of
+                        {success} ->
+                            ok;
+                        {error, Message} ->
+                            io:format("error while kicking ~p: ~p", [ClientName, Message])
+                    end
+            end;
         false ->
             io:format("Admin rights not available~n")
     end.

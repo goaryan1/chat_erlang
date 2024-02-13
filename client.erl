@@ -9,7 +9,7 @@ start() ->
     put(startPid, self()).
 
 start_helper(ClientStatus) ->
-    {ok, Socket} = gen_tcp:connect('localhost', 9991, [binary, {active, true}]),
+    {ok, Socket} = gen_tcp:connect('localhost', 9990, [binary, {active, true}]),
     gen_tcp:recv(Socket, 0),
     receive
         {tcp, Socket, BinaryData} ->
@@ -73,6 +73,7 @@ loop(ClientStatus, State) ->
             BinaryData = term_to_binary({online}),
             gen_tcp:send(Socket, BinaryData),
             io:format("You are Online Now :) ~n"),
+            recv_old_messages(ClientStatus),
             loop(ClientStatus, online);
         {StartPid, {topic}} when State =:= online ->
             BinaryData = term_to_binary({topic}),
@@ -105,6 +106,21 @@ private_message_helper(#client_status{} = ClientStatus) ->
                     io:format("~s~n",[Message]);
                 {error, Message} ->
                     io:format("Error : ~s~n",[Message])
+            end
+    end.
+
+recv_old_messages(ClientStatus) ->
+    ServerSocket = ClientStatus#client_status.serverSocket,
+    gen_tcp:recv(ServerSocket, 0),
+    receive
+        {tcp, ServerSocket, BinaryData} ->
+            Data = binary_to_term(BinaryData),
+            case Data of
+                {previous, List} ->
+                    io:format("Old Messages : ~n"),
+                    print_list(List);
+                _ ->
+                    ok
             end
     end.
 

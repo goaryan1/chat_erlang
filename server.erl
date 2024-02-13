@@ -79,11 +79,20 @@ loop(ClientSocket) ->
                     broadcast({ClientSocket, LeavingMessage}),
                     remove_client(ClientSocket);
                 {kick, KickClientName} ->
+                    io:format("kick initiated~n"),
                     KickClientSocket = getSocket(KickClientName),
-                    io:format("Client ~p was kicked from the chatroom.~n",[KickClientName]),
-                    KickingMessage = KickClientName ++ " was kicked from the chatroom.",
-                    broadcast({ClientSocket, KickingMessage}),
-                    remove_client(KickClientSocket),
+                    case KickClientSocket of
+                        {error, _} ->
+                            io:format("kick case 1~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({error, "User " ++ KickClientName ++" does not exist"}));
+                        _ ->
+                            io:format("kick case 2~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({success})),
+                            io:format("Client ~p was kicked from the chatroom.~n",[KickClientName]),
+                            KickingMessage = KickClientName ++ " was kicked from the chatroom.",
+                            broadcast({ClientSocket, KickingMessage}),
+                            remove_client(KickClientSocket)
+                    end,
                     loop(ClientSocket);
                 _ ->
                     io:format("Undefined message received~n")

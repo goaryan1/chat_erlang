@@ -78,8 +78,21 @@ loop(ClientSocket) ->
                     LeavingMessage = ClientName ++ " left the ChatRoom.",
                     broadcast({ClientSocket, LeavingMessage}),
                     remove_client(ClientSocket);
+                {make_admin, AdminClientName} ->
+                    % io:format("make admin initiated~n"),
+                    AdminClientSocket = getSocket(AdminClientName),
+                    case AdminClientSocket of
+                        {error, _} ->
+                            % io:format("make admin case 1~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({error, "User " ++ AdminClientName ++" does not exist"}));
+                        _ ->
+                            % io:format("make admin case 2~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({success})),
+                            make_admin(AdminClientName)
+                    end,
+                    loop(ClientSocket);
                 {kick, KickClientName} ->
-                    io:format("kick initiated~n"),
+                    % io:format("kick initiated~n"),
                     KickClientSocket = getSocket(KickClientName),
                     case KickClientSocket of
                         {error, _} ->
@@ -176,10 +189,8 @@ broadcast({SenderSocket, Message}) ->
         end, Keys).
 
 remove_client(ClientSocket) ->
-    ClientName = getUserName(ClientSocket),
-    ClientRecord = #client{clientSocket = ClientSocket, clientName = ClientName},
     mnesia:transaction(fun() ->
-        mnesia:delete_object(ClientRecord)
+        mnesia:delete({client, ClientSocket})
     end),
     gen_tcp:close(ClientSocket).
 
@@ -218,6 +229,9 @@ print_messages(N) ->
 
 make_admin() ->
     ClientName = string:trim(io:get_line("Enter Client Name: ")),
+    make_admin(ClientName).
+
+make_admin(ClientName) ->
     ClientSocket = getSocket(ClientName),
     case ClientSocket of
         {error, _Message} ->
@@ -236,8 +250,7 @@ remove_admin() ->
         {error, _Message} ->
             io:format("No such user found~n");
         ClientSocket ->
-            Trans = fun() ->
-                mnesia:write(#client{clientSocket = ClientSocket, clientName = ClientName, adminStatus = false}) end,
+            Trans = fun() -> mnesia:write(#client{clientSocket = ClientSocket, clientName = ClientName, adminStatus = false}) end,
             mnesia:transaction(Trans),
             gen_tcp:send(ClientSocket, term_to_binary({admin, false}))
     end.

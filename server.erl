@@ -156,6 +156,22 @@ loop(ClientSocket, ListenSocket) ->
                             remove_client(KickClientSocket)
                     end,
                     loop(ClientSocket, ListenSocket);
+                {mute_user, MuteClientName, MuteDuration} ->
+                    % io:format("kick initiated~n"),
+                    MuteClientSocket = getSocket(MuteClientName),
+                    case MuteClientSocket of
+                        {error, _} ->
+                            io:format("mute case 1~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({error, "User " ++ MuteClientName ++" does not exist"}));
+                        _ ->
+                            io:format("mute case 2~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({success})),
+                            io:format("Client ~p is now muted.~n",[MuteClientName]),
+                            MutingMessage = MuteClientName ++ " was muted.",
+                            broadcast({ClientSocket, MutingMessage}),
+                            mute_user(MuteClientName, MuteDuration)
+                    end,
+                    loop(ClientSocket, ListenSocket);
                 _ ->
                     io:format("Undefined message received~n")
             end;
@@ -367,6 +383,9 @@ remove_admin() ->
 mute_user() ->
     ClientName = string:trim(io:get_line("Enter Client Name: ")),
     {MuteDuration, []} = string:to_integer(string:trim(io:get_line("Mute Duration (in minutes): "))),
+    mute_user(ClientName, MuteDuration).
+
+mute_user(ClientName, MuteDuration) ->
     ClientSocket = getSocket(ClientName),
     case ClientSocket of
         {error, _Message} ->

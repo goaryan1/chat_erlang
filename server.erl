@@ -10,9 +10,9 @@ start() ->
     {N,[]} =  string:to_integer(string:trim(io:get_line("Enter No of Clients Allowed : "))),
     {X,[]} =  string:to_integer(string:trim(io:get_line("Message History Size : "))),
     ChatTopic = string:trim(io:get_line("Enter Chat Topic : ")),
-    {ok, ListenSocket} = gen_tcp:listen(9990, [binary, {packet, 0}, {active, true}]),
+    {ok, ListenSocket} = gen_tcp:listen(9991, [binary, {packet, 0}, {active, true}]),
     put(listenSocket, ListenSocket),
-    io:format("Server listening on port 9990 and Socket : ~p ~n",[ListenSocket]),
+    io:format("Server listening on port 9991 and Socket : ~p ~n",[ListenSocket]),
     Counter = 1,
     ServerRecord = #server_status{listenSocket = ListenSocket, counter = Counter, maxClients = N, historySize = X, chatTopic = ChatTopic},
     mnesia:transaction(fun() ->
@@ -215,7 +215,7 @@ get_old_messages(ClientSocket, Last_Active) ->
     ReceiverName = getUserName(ClientSocket),
     Filtered = lists:filter(
         fun({message,Timestamp,SenderName,_,Receiver}) ->
-                (Receiver == ReceiverName orelse Receiver=="All") andalso SenderName /= ReceiverName  andalso compare_timestamps(Timestamp, Last_Active) =:= greater 
+                (Receiver == ReceiverName) andalso SenderName /= ReceiverName  andalso compare_timestamps(Timestamp, Last_Active) =:= greater 
             end, Query),
     Final = lists:map(
             fun({message,_, SenderName, Text, _}) ->

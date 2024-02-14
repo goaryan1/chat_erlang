@@ -1,5 +1,5 @@
 -module(server).
--export([start/0, accept_clients/1, get_chat_topic/1, update_chat_topic/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/, make_admin/0, remove_admin/0, mute_user/0, unmute_user/0]).
+-export([start/0, accept_clients/1, get_chat_topic/1, update_chat_topic/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/2, make_admin/0, remove_admin/0, mute_user/0, unmute_user/0]).
 -record(client, {clientSocket, clientName, adminStatus = false, state = online, timestamp}).
 -record(message, {timestamp, senderName, text, receiver}).
 -record(server_status, {listenSocket, counter, maxClients, historySize, chatTopic}).
@@ -66,18 +66,23 @@ loop(ClientSocket, ListenSocket) ->
                 % Private Message
                 {private_message, Message, Receiver} ->
                     RecSocket = getSocket(Receiver),
-                    RecvState = get_state(RecSocket),
-                    if 
-                        RecvState =:= online ->
-                            io:format("Client ~p send message to ~p : ~p~n", [getUserName(ClientSocket), Receiver, Message]),
-                            broadcast({ClientSocket, Message}, Receiver);
-                        true ->
-                            SenderName = getUserName(ClientSocket),
-                            Msg = "Receiver is Oflline, he will be notified later.",
-                            insert_message_database(SenderName, Message, Receiver),
-                            io:format("~s~n",[Msg]),
-                            gen_tcp:send(ClientSocket, term_to_binary({warning, Msg}))
-                    end,
+                    case RecSocket of
+                        {error, _} ->
+                            gen_tcp:send(ClientSocket, term_to_binary({error, "User not found"}));
+                        _RecSocket ->
+                            RecvState = get_state(RecSocket),
+                            if
+                                RecvState =:= online ->
+                                    io:format("Client ~p send message to ~p : ~p~n", [getUserName(ClientSocket), Receiver, Message]),
+                                    broadcast({ClientSocket, Message}, Receiver);
+                                true ->
+                                    SenderName = getUserName(ClientSocket),
+                                    Msg = "Receiver is Oflline, he will be notified later.",
+                                    insert_message_database(SenderName, Message, Receiver),
+                                    io:format("~s~n",[Msg]),
+                                    gen_tcp:send(ClientSocket, term_to_binary({warning, Msg}))
+                            end
+                        end,
                     loop(ClientSocket, ListenSocket);
                 % Broadcast Message
                 {message, Message} ->
@@ -134,7 +139,7 @@ loop(ClientSocket, ListenSocket) ->
                             gen_tcp:send(ClientSocket, term_to_binary({success})),
                             make_admin(AdminClientName)
                     end,
-                    loop(ClientSocket);
+                    loop(ClientSocket, ListenSocket);
                 {kick, KickClientName} ->
                     % io:format("kick initiated~n"),
                     KickClientSocket = getSocket(KickClientName),
@@ -150,7 +155,7 @@ loop(ClientSocket, ListenSocket) ->
                             broadcast({ClientSocket, KickingMessage}),
                             remove_client(KickClientSocket)
                     end,
-                    loop(ClientSocket);
+                    loop(ClientSocket, ListenSocket);
                 _ ->
                     io:format("Undefined message received~n")
             end;
@@ -159,7 +164,6 @@ loop(ClientSocket, ListenSocket) ->
             io:format("Client ~p disconnected~n", [getUserName(ClientSocket)]),
             remove_client(ClientSocket)
     end.
-    % loop(ClientSocket).
 
 insert_client_database(ClientSocket, ClientName) ->
     ClientRecord = #client{clientSocket=ClientSocket, clientName = ClientName, state=online, timestamp = os:timestamp()},

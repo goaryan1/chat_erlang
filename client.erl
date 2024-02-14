@@ -10,7 +10,7 @@ start() ->
     ok.
 
 start_helper(ClientStatus) ->
-    {ok, Socket} = gen_tcp:connect('localhost', 9990, [binary, {active, true}]),
+    {ok, Socket} = gen_tcp:connect('localhost', 9991, [binary, {active, true}]),
     gen_tcp:recv(Socket, 0),
     receive
         {tcp, Socket, BinaryData} ->
@@ -19,8 +19,14 @@ start_helper(ClientStatus) ->
                 {connected, Name, MessageHistory, ChatTopic} ->
                     io:format("connected to server, with username ~p~n", [Name]),
                     io:format("Topic of the ChatRoom is : ~p~n",[ChatTopic]),
-                    io:format("Message History: ~n"),
-                    print_list(MessageHistory),
+                    Len = list_size(MessageHistory),
+                    if 
+                        Len == 0 ->
+                            io:format("No Message History ~n");
+                        true ->        
+                            io:format("Message History: ~n"),
+                            print_list(MessageHistory)
+                    end,
                     ClientStatus1 = ClientStatus#client_status{serverSocket = Socket, name = Name},
                     loop(ClientStatus1, online);
                 {reject, Message} ->
@@ -127,6 +133,8 @@ loop(ClientStatus, State) ->
                     case Status of
                         {success} ->
                             io:format("Topic of the ChatRoom is updated to : ~p~n",[NewTopic]);
+                        {failed} ->
+                            io:format("Only Admin's can change the topic of Chat : ~n");
                         _ ->
                             io:format("Error while Changing the Topic")
                     end;
@@ -238,8 +246,14 @@ recv_old_messages(ClientStatus) ->
             Data = binary_to_term(BinaryData),
             case Data of
                 {previous, List} ->
-                    io:format("Old Messages : ~n"),
-                    print_list(List);
+                    Len = list_size(List),
+                    if 
+                        Len == 0 ->
+                            io:format("No Prev Messages for Now ~n");
+                        true ->    
+                            io:format("Old Messages : ~n"),
+                                print_list(List)
+                    end;
                 _ ->
                     ok
             end
@@ -362,6 +376,15 @@ mute_user() ->
     SpawnedPid = get(spawnedPid),
     SpawnedPid ! {StartPid, {mute_user, ClientName, MuteDuration}},
     ok.
+
+list_size(L) ->
+    list_size(L,0).
+
+list_size([_ | Rest], Count) ->
+    list_size(Rest, Count+1);
+
+list_size([], Count) ->
+    Count.
 
 
 

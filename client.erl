@@ -1,5 +1,5 @@
 -module(client).
--export([start/0, send_message/0, offline/0, online/0, loop/2, exit/0, change_topic/0, get_chat_topic/0, start_helper/1, send_private_message/0, show_clients/0, help/0, kick_user/0, make_admin/0, show_admins/0, mute_user/0]).
+-export([start/0, send_message/0, offline/0, online/0, loop/2, exit/0, change_topic/0, get_chat_topic/0, start_helper/1, send_private_message/0, show_clients/0, help/0, kick_user/0, make_admin/0, show_admins/0, mute_user/0, unmute_user/0]).
 -record(client_status, {name, serverSocket, startPid, spawnedPid, adminStatus = false, muteTime = os:timestamp(), muteDuration = 0}).
 
 start() ->
@@ -59,13 +59,19 @@ loop(ClientStatus, State) ->
                 {mute, NewMuteStatus, Duration} ->
                     case NewMuteStatus of
                         true ->
-                            ClientStatus1 = ClientStatus#client_status{muteTime = os:timestamp(), muteDuration = Duration},
-                            io:format("Muted for ~p minutes~n", [Duration]);
+                            if 
+                                Duration == 0 ->
+                                    io:format("Unmuted !!~n");
+                                true ->
+                                    ClientStatus1 = ClientStatus#client_status{muteTime = os:timestamp(), muteDuration = Duration},
+                                    io:format("Muted for ~p minutes~n", [Duration]),
+                                    loop(ClientStatus1, State)
+                            end;
                         false ->
                             ClientStatus1 = ClientStatus#client_status{muteTime = os:timestamp(), muteDuration = 0},
-                            io:format("Unmuted !!~n")
-                    end,
-                    loop(ClientStatus1, State);
+                            io:format("Unmuted !!~n"),
+                            loop(ClientStatus1, State)
+                    end;
                 _ ->
                     io:format("Undefined message received~n")
             end;
@@ -375,6 +381,13 @@ mute_user() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
     SpawnedPid ! {StartPid, {mute_user, ClientName, MuteDuration}},
+    ok.
+
+unmute_user() ->
+    ClientName = string:trim(io:get_line("Enter Client Name: ")),
+    StartPid = get(startPid),
+    SpawnedPid = get(spawnedPid),
+    SpawnedPid ! {StartPid, {mute_user, ClientName, 0}},
     ok.
 
 list_size(L) ->

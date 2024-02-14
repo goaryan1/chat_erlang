@@ -127,7 +127,8 @@ loop(ClientStatus, State) ->
                         {success} ->
                             io:format("Topic of the ChatRoom is updated to : ~p~n",[NewTopic]);
                         _ ->
-                            io:format("Error while Changing the Topic");
+                            io:format("Error while Changing the Topic")
+                    end;
                 {kick, ClientName} ->
                     kick_helper(ClientStatus, ClientName)
             end

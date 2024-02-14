@@ -6,7 +6,8 @@ start() ->
     ClientStatus = #client_status{startPid = self()},
     SpawnedPid = spawn(client, start_helper, [ClientStatus]),
     put(spawnedPid, SpawnedPid),
-    put(startPid, self()).
+    put(startPid, self()),
+    ok.
 
 start_helper(ClientStatus) ->
     {ok, Socket} = gen_tcp:connect('localhost', 9990, [binary, {active, true}]),
@@ -254,45 +255,53 @@ change_topic() ->
     Topic = string:trim(io:get_line("Enter New Topic : ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {change_topic, Topic}}.
+    SpawnedPid ! {StartPid, {change_topic, Topic}},
+    ok.
 
 send_message() ->
     Message = string:trim(io:get_line("Enter message: ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {message, Message}}.
+    SpawnedPid ! {StartPid, {message, Message}},
+    ok.
 
 send_private_message() ->
     Message = string:trim(io:get_line("Enter message: ")),
     Receiver = string:trim(io:get_line("Enter receiver name: ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {private_message, Message, Receiver}}.
+    SpawnedPid ! {StartPid, {private_message, Message, Receiver}},
+    ok.
 
 offline() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {offline}}.
+    SpawnedPid ! {StartPid, {offline}},
+    ok.
 
 online() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {online}}.
+    SpawnedPid ! {StartPid, {online}},
+    ok.
 
 exit() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {exit}}.
+    SpawnedPid ! {StartPid, {exit}},
+    ok.
 
 get_chat_topic() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {topic}}.
+    SpawnedPid ! {StartPid, {topic}},
+    ok.
 
 show_clients() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {show_clients}}.
+    SpawnedPid ! {StartPid, {show_clients}},
+    ok.
 
 help() ->
     % show available commands
@@ -307,18 +316,21 @@ kick() ->
     ClientName = string:trim(io:get_line("Enter Client Name: ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {kick, ClientName}}.
+    SpawnedPid ! {StartPid, {kick, ClientName}},
+    ok.
 
 make_admin() ->
     ClientName = string:trim(io:get_line("Enter Client Name: ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {make_admin, ClientName}}.
+    SpawnedPid ! {StartPid, {make_admin, ClientName}},
+    ok.
 
 show_admins() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
-    SpawnedPid ! {StartPid, {show_admins}}.
+    SpawnedPid ! {StartPid, {show_admins}},
+    ok.
 
 
 

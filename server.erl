@@ -1,6 +1,6 @@
 -module(server).
 -export([start/0, accept_clients/1, get_chat_topic/1, update_chat_topic/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/2, make_admin/0, remove_admin/0, mute_user/0, unmute_user/0]).
--record(client, {clientSocket, clientName, adminStatus = false, state = online, timestamp}).
+-record(client, {clientSocket, clientName, adminStatus = false, state = online, timestamp = os:timestamp()}).
 -record(message, {timestamp, senderName, text, receiver}).
 -record(server_status, {listenSocket, counter, maxClients, historySize, chatTopic}).
 -include_lib("stdlib/include/qlc.hrl").
@@ -10,13 +10,16 @@ start() ->
     {N,[]} =  string:to_integer(string:trim(io:get_line("Enter No of Clients Allowed : "))),
     {X,[]} =  string:to_integer(string:trim(io:get_line("Message History Size : "))),
     ChatTopic = string:trim(io:get_line("Enter Chat Topic : ")),
-    {ok, ListenSocket} = gen_tcp:listen(9990, [binary, {packet, 0}, {active, true}]),
-    io:format("Server listening on port 9990 and Socket : ~p ~n",[ListenSocket]),
+    {ok, ListenSocket} = gen_tcp:listen(9991, [binary, {packet, 0}, {active, true}]),
+    put(listenSocket, ListenSocket),
+    io:format("Server listening on port 9991 and Socket : ~p ~n",[ListenSocket]),
     Counter = 1,
     ServerRecord = #server_status{listenSocket = ListenSocket, counter = Counter, maxClients = N, historySize = X, chatTopic = ChatTopic},
     mnesia:transaction(fun() ->
         mnesia:write(ServerRecord) end),
-    spawn(server, accept_clients, [ListenSocket]).
+    AcceptPid = spawn(server, accept_clients, [ListenSocket]),
+    put(acceptPid, AcceptPid),
+    ok.
 
 init_databases() ->
     mnesia:start(),
@@ -114,11 +117,19 @@ loop(ClientSocket, ListenSocket) ->
                     gen_tcp:send(ClientSocket, term_to_binary({topic, Topic})),
                     loop(ClientSocket, ListenSocket);
                 %Change Chat Topic
-                {change_topic, NewTopic} ->
-                    update_chat_topic(NewTopic, ListenSocket),
-                    gen_tcp:send(ClientSocket, term_to_binary({success})),
-                    Message = "Chat Topic Updated to " ++ NewTopic,
-                    broadcast({ClientSocket, Message}),
+                {change_topic, NewTopic}->
+                    Trans = fun() -> mnesia:read({client, ClientSocket}) end,
+                    {atomic, [Row]} = mnesia:transaction(Trans),
+                    AdminStatus = Row#client.adminStatus,
+                    case AdminStatus of
+                        true ->
+                            update_chat_topic(NewTopic, ListenSocket),
+                            gen_tcp:send(ClientSocket, term_to_binary({success})),
+                            Message = "Chat Topic Updated to " ++ NewTopic,
+                            broadcast({ClientSocket, Message});
+                        _ ->
+                            gen_tcp:send(ClientSocket, term_to_binary({failed}))
+                    end,
                     loop(ClientSocket, ListenSocket);
                 % Exit from ChatRoom
                 {exit} ->
@@ -177,8 +188,12 @@ insert_message_database(ClientName, Message, Receiver) ->
             mnesia:write(MessageRecord)
         end).
 
-compare_timestamps({Seconds1, Microseconds1, _}, {Seconds2, Microseconds2, _}) ->
+compare_timestamps({MegaSeconds1, Seconds1, Microseconds1}, {MegaSeconds2, Seconds2, Microseconds2}) ->
     if
+        MegaSeconds1 < MegaSeconds2 ->
+            less;
+        MegaSeconds1 > MegaSeconds2 ->
+            greater;
         Seconds1 < Seconds2 ->
             less;
         Seconds1 > Seconds2 ->
@@ -199,8 +214,8 @@ get_old_messages(ClientSocket, Last_Active) ->
     {atomic, Query} = mnesia:transaction(F),
     ReceiverName = getUserName(ClientSocket),
     Filtered = lists:filter(
-        fun({message,Timestamp,_,_,Receiver}) ->
-                (Receiver == ReceiverName orelse Receiver=="All") andalso compare_timestamps(Timestamp, Last_Active) =:= greater 
+        fun({message,Timestamp,SenderName,_,Receiver}) ->
+                (Receiver == ReceiverName) andalso SenderName /= ReceiverName  andalso compare_timestamps(Timestamp, Last_Active) =:= greater 
             end, Query),
     Final = lists:map(
             fun({message,_, SenderName, Text, _}) ->
@@ -269,11 +284,11 @@ broadcast({SenderSocket, Message}) ->
                 case ClientSocket/=SenderSocket of
                     true ->
                         case mnesia:dirty_read({client, ClientSocket}) of
-                        [_] ->
-                            io:format("Broadcasted the Message~n"),
-                            gen_tcp:send(ClientSocket, term_to_binary({message, SenderName, Message}));
-                        [] ->
-                            io:format("No receiver Found ~n") 
+                            [_] ->
+                                io:format("Broadcasted the Message~n"),
+                                gen_tcp:send(ClientSocket, term_to_binary({message, SenderName, Message}));
+                            [] ->
+                                io:format("No receiver Found ~n") 
                         end;
                     false -> ok
                 end;
@@ -385,7 +400,16 @@ unmute_user() ->
             gen_tcp:send(ClientSocket, term_to_binary({mute, false, 0}))
     end.
 
-
+% exit() ->
+%     Trans = fun() -> mnesia:all_keys(client) end,
+%     {atomic, Keys} = mnesia:transaction(Trans),
+%     lists:foreach(fun(ClientSocket) ->   
+%         gen_tcp:close(ClientSocket)   
+%     end, Keys),
+%     ListenSocket = get(listenSocket),
+%     gen_tcp:close(ListenSocket),
+%     exit(get(acceptPid)),
+%     exit(self()).
 
 % -----------------------------------------
 
@@ -421,5 +445,3 @@ unmute_user() ->
 %             updateName(ClientSocket, NewName),
 %             gen_tcp:send(ClientSocket, term_to_binary({success, "Name updated to " ++ NewName}))
 %     end
-
-

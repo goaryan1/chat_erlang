@@ -1,8 +1,8 @@
 -module(server).
--export([start/0, accept_clients/1, get_chat_topic/1, update_chat_topic/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/2, make_admin/0, remove_admin/0, mute_user/0, unmute_user/0, show_admins/0]).
+-export([start/0, accept_clients/1, get_chat_topic/1, update_chat_topic/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/2, make_admin/0, remove_admin/0, mute_user/0, unmute_user/0, show_admins/0, toggle_config/0]).
 -record(client, {clientSocket, clientName, adminStatus = false, state = online, timestamp = os:timestamp()}).
 -record(message, {timestamp, senderName, text, receiver}).
--record(server_status, {listenSocket, counter, maxClients, historySize, chatTopic}).
+-record(server_status, {listenSocket, counter, maxClients, historySize, chatTopic, config}).
 -include_lib("stdlib/include/qlc.hrl").
 
 start() ->
@@ -14,7 +14,7 @@ start() ->
     put(listenSocket, ListenSocket),
     io:format("Server listening on port 9991 and Socket : ~p ~n",[ListenSocket]),
     Counter = 1,
-    ServerRecord = #server_status{listenSocket = ListenSocket, counter = Counter, maxClients = N, historySize = X, chatTopic = ChatTopic},
+    ServerRecord = #server_status{listenSocket = ListenSocket, counter = Counter, maxClients = N, historySize = X, chatTopic = ChatTopic, config = restricted},
     mnesia:transaction(fun() ->
         mnesia:write(ServerRecord) end),
     AcceptPid = spawn(server, accept_clients, [ListenSocket]),
@@ -120,14 +120,17 @@ loop(ClientSocket, ListenSocket) ->
                 {change_topic, NewTopic}->
                     Trans = fun() -> mnesia:read({client, ClientSocket}) end,
                     {atomic, [Row]} = mnesia:transaction(Trans),
+                    Trans2 = fun() -> mnesia:read({server_status, ListenSocket}) end,
+                    {atomic, [Record]} = mnesia:transaction(Trans2),
+                    Config = Record#server_status.config,
                     AdminStatus = Row#client.adminStatus,
-                    case AdminStatus of
-                        true ->
+                    if
+                        AdminStatus == true orelse Config == open ->
                             update_chat_topic(NewTopic, ListenSocket),
                             gen_tcp:send(ClientSocket, term_to_binary({success})),
                             Message = "Chat Topic Updated to " ++ NewTopic,
                             broadcast({ClientSocket, Message});
-                        _ ->
+                        true ->
                             gen_tcp:send(ClientSocket, term_to_binary({failed}))
                     end,
                     loop(ClientSocket, ListenSocket);
@@ -418,6 +421,21 @@ unmute_user() ->
         ClientSocket ->
             gen_tcp:send(ClientSocket, term_to_binary({mute, false, 0}))
     end.
+
+toggle_config() ->
+    ListenSocket = get(listenSocket),
+    Trans = fun() -> mnesia:read({server_status, ListenSocket}) end,
+    {atomic, [Row]} = mnesia:transaction(Trans),
+    case Row#server_status.config of
+        restricted ->
+            io:format("switching to open Mode ~n"),
+            UpdatedRecord = Row#server_status{config = open};
+        open ->
+            io:format("switching to restricted Mode ~n"),
+            UpdatedRecord = Row#server_status{config = restricted}
+    end,
+    mnesia:transaction(fun() -> mnesia:write(UpdatedRecord) end),
+    ok.
 
 show_admins() ->
     ClientList = retreive_clients(),

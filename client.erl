@@ -1,5 +1,5 @@
 -module(client).
--export([start/0, send_message/0, offline/0, online/0, loop/2, exit/0, change_topic/0, get_chat_topic/0, start_helper/1, send_private_message/0, show_clients/0, help/0, kick/0, make_admin/0, show_admins/0, list_size/1, list_size/2]).
+-export([start/0, send_message/0, offline/0, online/0, loop/2, exit/0, change_topic/0, get_chat_topic/0, start_helper/1, send_private_message/0, show_clients/0, help/0, kick_user/0, make_admin/0, show_admins/0, mute_user/0]).
 -record(client_status, {name, serverSocket, startPid, spawnedPid, adminStatus = false, muteTime = os:timestamp(), muteDuration = 0}).
 
 start() ->
@@ -139,7 +139,9 @@ loop(ClientStatus, State) ->
                             io:format("Error while Changing the Topic")
                     end;
                 {kick, ClientName} ->
-                    kick_helper(ClientStatus, ClientName)
+                    kick_helper(ClientStatus, ClientName);
+                {mute_user, ClientName, MuteDuration} ->
+                    mute_helper(ClientStatus, ClientName, MuteDuration)
             end
     end,
     loop(ClientStatus, online).
@@ -192,7 +194,28 @@ kick_helper(ClientStatus, ClientName) ->
                         {success} ->
                             ok;
                         {error, Message} ->
-                            io:format("error while kicking ~p: ~p", [ClientName, Message])
+                            io:format("error while kicking ~p: ~p~n", [ClientName, Message])
+                    end
+            end;
+        false ->
+            io:format("Admin rights not available~n")
+    end.
+
+mute_helper(ClientStatus, ClientName, MuteDuration) ->
+    Socket = ClientStatus#client_status.serverSocket,
+    AdminStatus = ClientStatus#client_status.adminStatus,
+    case AdminStatus of
+        true ->
+            BinaryData = term_to_binary({mute_user, ClientName, MuteDuration}),
+            gen_tcp:send(Socket, BinaryData),
+            receive
+                {tcp, Socket, BinaryDataRec} ->
+                    Data = binary_to_term(BinaryDataRec),
+                    case Data of
+                        {success} ->
+                            ok;
+                        {error, Message} ->
+                            io:format("error while muting ~p: ~p~n", [ClientName, Message])
                     end
             end;
         false ->
@@ -326,7 +349,7 @@ print_list(List) ->
     lists:foreach(fun(X) ->
         io:format("~p~n", [X]) end, List).
 
-kick() ->
+kick_user() ->
     ClientName = string:trim(io:get_line("Enter Client Name: ")),
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
@@ -344,6 +367,14 @@ show_admins() ->
     StartPid = get(startPid),
     SpawnedPid = get(spawnedPid),
     SpawnedPid ! {StartPid, {show_admins}},
+    ok.
+
+mute_user() ->
+    ClientName = string:trim(io:get_line("Enter Client Name: ")),
+    {MuteDuration, []} = string:to_integer(string:trim(io:get_line("Mute Duration (in minutes): "))),
+    StartPid = get(startPid),
+    SpawnedPid = get(spawnedPid),
+    SpawnedPid ! {StartPid, {mute_user, ClientName, MuteDuration}},
     ok.
 
 list_size(L) ->

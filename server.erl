@@ -1,5 +1,5 @@
 -module(server).
--export([start/0, accept_clients/1, get_chat_topic/1, update_chat_topic/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/2, make_admin/0, remove_admin/0, mute_user/0, unmute_user/0]).
+-export([start/0, accept_clients/1, get_chat_topic/1, update_chat_topic/2, broadcast/1, broadcast/2, remove_client/1, show_clients/0, print_messages/1, loop/2, make_admin/0, remove_admin/0, mute_user/0, unmute_user/0, show_admins/0]).
 -record(client, {clientSocket, clientName, adminStatus = false, state = online, timestamp = os:timestamp()}).
 -record(message, {timestamp, senderName, text, receiver}).
 -record(server_status, {listenSocket, counter, maxClients, historySize, chatTopic}).
@@ -165,6 +165,22 @@ loop(ClientSocket, ListenSocket) ->
                             KickingMessage = KickClientName ++ " was kicked from the chatroom.",
                             broadcast({ClientSocket, KickingMessage}),
                             remove_client(KickClientSocket)
+                    end,
+                    loop(ClientSocket, ListenSocket);
+                {mute_user, MuteClientName, MuteDuration} ->
+                    % io:format("kick initiated~n"),
+                    MuteClientSocket = getSocket(MuteClientName),
+                    case MuteClientSocket of
+                        {error, _} ->
+                            io:format("mute case 1~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({error, "User " ++ MuteClientName ++" does not exist"}));
+                        _ ->
+                            io:format("mute case 2~n"),
+                            gen_tcp:send(ClientSocket, term_to_binary({success})),
+                            io:format("Client ~p is now muted.~n",[MuteClientName]),
+                            MutingMessage = MuteClientName ++ " was muted.",
+                            broadcast({ClientSocket, MutingMessage}),
+                            mute_user(MuteClientName, MuteDuration)
                     end,
                     loop(ClientSocket, ListenSocket);
                 _ ->
@@ -382,6 +398,9 @@ remove_admin() ->
 mute_user() ->
     ClientName = string:trim(io:get_line("Enter Client Name: ")),
     {MuteDuration, []} = string:to_integer(string:trim(io:get_line("Mute Duration (in minutes): "))),
+    mute_user(ClientName, MuteDuration).
+
+mute_user(ClientName, MuteDuration) ->
     ClientSocket = getSocket(ClientName),
     case ClientSocket of
         {error, _Message} ->
@@ -400,16 +419,17 @@ unmute_user() ->
             gen_tcp:send(ClientSocket, term_to_binary({mute, false, 0}))
     end.
 
-% exit() ->
-%     Trans = fun() -> mnesia:all_keys(client) end,
-%     {atomic, Keys} = mnesia:transaction(Trans),
-%     lists:foreach(fun(ClientSocket) ->   
-%         gen_tcp:close(ClientSocket)   
-%     end, Keys),
-%     ListenSocket = get(listenSocket),
-%     gen_tcp:close(ListenSocket),
-%     exit(get(acceptPid)),
-%     exit(self()).
+show_admins() ->
+    ClientList = retreive_clients(),
+    FilteredClientList = lists:filter(fun({client, _, _, Status, _, _}) ->
+        Status == true end, ClientList),
+    FormattedAdminClientList = lists:map(fun({client, _, Name, _, _, _}) ->
+        Name
+        end, FilteredClientList),
+    io:format("Admin Clients:~n"),
+    lists:foreach(fun(X) ->
+        io:format("~p~n", [X]) end, FormattedAdminClientList).
+
 
 % -----------------------------------------
 

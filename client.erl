@@ -127,6 +127,8 @@ loop(ClientStatus, State) ->
                     case Status of
                         {success} ->
                             io:format("Topic of the ChatRoom is updated to : ~p~n",[NewTopic]);
+                        {failed} ->
+                            io:format("Only Admin's can change the topic of Chat : ~n");
                         _ ->
                             io:format("Error while Changing the Topic")
                     end;
@@ -150,7 +152,7 @@ make_admin_helper(ClientStatus, ClientName) ->
                         {success} ->
                             ok;
                         {error, Message} ->
-                            io:format("error: ~p", [Message])
+                            io:format("error: ~p~n", [Message])
                     end
             end;
         false ->
